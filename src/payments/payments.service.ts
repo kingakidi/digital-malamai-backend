@@ -8,11 +8,12 @@ export class PaymentsService {
     private readonly paymentFulfillmentService: PaymentFulfillmentService,
   ) {}
 
-  verifyPayment(dto: VerifyPaymentDto) {
+  verifyPayment(dto: VerifyPaymentDto, requestingStudentEmail: string) {
     return this.paymentFulfillmentService.verifyAndFulfill({
       transactionId: dto.transactionId,
       txRef: dto.txRef,
       source: 'api',
+      requestingStudentEmail,
     });
   }
 

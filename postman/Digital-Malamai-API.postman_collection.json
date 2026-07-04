@@ -1,0 +1,1212 @@
+{
+  "info": {
+    "_postman_id": "digital-malamai-api-v1",
+    "name": "Digital Malamai API",
+    "description": "NestJS backend for Digital Malamai.\n\n**Base URL:** `{{baseUrl}}`\n\n**Auth:** Bearer `{{accessToken}}` (set automatically after Staff Login or Student Login).\n\n**Response envelope:**\n```json\n{ \"status\": true, \"message\": \"...\", \"data\": {} }\n```\n\n**Errors:**\n```json\n{ \"status\": false, \"message\": \"...\", \"error\": \"...\" }\n```",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000/api/v1" },
+    { "key": "rootUrl", "value": "http://localhost:3000" },
+    { "key": "accessToken", "value": "" },
+    { "key": "userId", "value": "" },
+    { "key": "roleId", "value": "" },
+    { "key": "partnerId", "value": "" },
+    { "key": "courseId", "value": "" },
+    { "key": "videoId", "value": "" },
+    { "key": "courseSlug", "value": "" },
+    { "key": "flutterwaveSecretHash", "value": "your-flutterwave-webhook-hash" }
+  ],
+  "item": [
+    {
+      "name": "Welcome",
+      "auth": { "type": "noauth" },
+      "item": [
+        {
+          "name": "Root welcome",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{rootUrl}}/"
+          }
+        },
+        {
+          "name": "API welcome",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "auth": { "type": "noauth" },
+      "item": [
+        {
+          "name": "Staff login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.accessToken) {",
+                  "  pm.collectionVariables.set('accessToken', res.data.accessToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@example.com\",\n  \"password\": \"ChangeMe123!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/staff/login"
+          }
+        },
+        {
+          "name": "Login (alias)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@example.com\",\n  \"password\": \"ChangeMe123!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Student check payment eligibility",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"jane.student@example.com\",\n  \"paidFor\": \"onboarding\",\n  \"partnerId\": \"{{partnerId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/student/check-payment-eligibility",
+            "description": "Public. Checks local database and Flutterwave (last 30 days, proxied via backend) for an existing successful onboarding payment for this email + partner. Use `paidFor: course` with `courseId` for course purchases."
+          }
+        },
+        {
+          "name": "Student register",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"partnerId\": \"{{partnerId}}\",\n  \"fullName\": \"Jane Doe\",\n  \"email\": \"jane.student@example.com\",\n  \"phone\": \"08012345678\",\n  \"accessCode\": \"ABC123\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/student/register",
+            "description": "Validates partner, email, phone, and access code only. Does **not** create a student account or mark the access code used. Returns `onboardingFee` and `currency` for Flutterwave checkout. Include the same fields in payment metadata: `paidFor: onboarding`, `email`, `partnerId`, `accessCode`, `fullName`, `phone`."
+          }
+        },
+        {
+          "name": "Student verify onboarding payment",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"txRef\": \"dm-onboard-1234567890-abc123\",\n  \"transactionId\": \"1234567\",\n  \"email\": \"jane.student@example.com\",\n  \"partnerId\": \"{{partnerId}}\",\n  \"accessCode\": \"ABC123\",\n  \"fullName\": \"Jane Doe\",\n  \"phone\": \"08012345678\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/student/verify-onboarding-payment",
+            "description": "Public endpoint (no auth). Idempotent: safe to call multiple times. Prefer `txRef` when available. Include registration fallback fields when Flutterwave metadata is empty. Creates student if missing; skips if already registered."
+          }
+        },
+        {
+          "name": "Student requery onboarding payment",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"txRef\": \"dm-onboard-1234567890-abc123\",\n  \"email\": \"jane.student@example.com\",\n  \"partnerId\": \"{{partnerId}}\",\n  \"accessCode\": \"ABC123\",\n  \"fullName\": \"Jane Doe\",\n  \"phone\": \"08012345678\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/student/requery-onboarding-payment",
+            "description": "Same as verify onboarding payment. Use to manually requery Flutterwave and complete registration if webhook/redirect failed."
+          }
+        },
+        {
+          "name": "Student login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.accessToken) {",
+                  "  pm.collectionVariables.set('accessToken', res.data.accessToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"jane.student@example.com\",\n  \"credential\": \"ABC123\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/student/login",
+            "description": "Works only after onboarding payment creates the student account. Use email or phone as `identifier` and the access code as `credential`."
+          }
+        },
+        {
+          "name": "Forgot password — send OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"jane.student@example.com\",\n  \"type\": \"email\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/forgot-password/send"
+          }
+        },
+        {
+          "name": "Forgot password — reset",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"jane.student@example.com\",\n  \"type\": \"email\",\n  \"code\": \"123456\",\n  \"newPassword\": \"NewSecurePass1\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/forgot-password/reset"
+          }
+        },
+        {
+          "name": "Get profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/auth/profile"
+          }
+        },
+        {
+          "name": "OTP — send",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"email\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/otp/send",
+            "description": "Student auth required. type: email | phone"
+          }
+        },
+        {
+          "name": "OTP — verify",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"email\",\n  \"code\": \"123456\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/otp/verify"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "List users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users?page=1&limit=20&sortBy=createdAt&sortOrder=DESC",
+              "host": ["{{baseUrl}}"],
+              "path": ["users"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "sortBy", "value": "createdAt" },
+                { "key": "sortOrder", "value": "DESC" },
+                { "key": "search", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create user",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"John\",\n  \"lastName\": \"Manager\",\n  \"email\": \"manager@example.com\",\n  \"password\": \"SecurePass123\",\n  \"roleId\": \"{{roleId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/users"
+          }
+        },
+        {
+          "name": "Get user by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/users/{{userId}}"
+          }
+        },
+        {
+          "name": "Update user",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"John\",\n  \"lastName\": \"Manager Updated\"\n}"
+            },
+            "url": "{{baseUrl}}/users/{{userId}}"
+          }
+        },
+        {
+          "name": "Delete user",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/users/{{userId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin Users",
+      "description": "Superadmin only — staff accounts (excludes students)",
+      "item": [
+        {
+          "name": "List staff accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/users?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "users"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create staff account",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Alice\",\n  \"lastName\": \"Admin\",\n  \"email\": \"alice@example.com\",\n  \"roleId\": \"{{roleId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/users",
+            "description": "Superadmin only. Password is optional — a temporary password is emailed if omitted. Admin/manager roles only (not partner or superadmin)."
+          }
+        },
+        {
+          "name": "Resend staff welcome email",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/admin/users/{{userId}}/resend-welcome-email",
+            "description": "Superadmin only. Generates a new temporary password and emails it asynchronously."
+          }
+        },
+        {
+          "name": "Change password (staff)",
+          "auth": {
+            "type": "bearer",
+            "bearer": [
+              { "key": "token", "value": "{{accessToken}}", "type": "string" }
+            ]
+          },
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"TEMP_PASSWORD_FROM_EMAIL\",\n  \"newPassword\": \"NewSecurePass123\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/change-password",
+            "description": "Required on first login for staff/partner accounts. Clears `mustChangePassword`."
+          }
+        },
+        {
+          "name": "Patch staff account",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}"
+            },
+            "url": "{{baseUrl}}/admin/users/{{userId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Roles",
+      "item": [
+        {
+          "name": "Permission groups",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/roles/permissions/groups"
+          }
+        },
+        {
+          "name": "List roles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/roles?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["roles"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create role",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"support_lead\",\n  \"title\": \"Support Lead\",\n  \"permissionKeys\": [\"users:read:all\", \"roles:read:all\"]\n}"
+            },
+            "url": "{{baseUrl}}/roles"
+          }
+        },
+        {
+          "name": "Get role by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/roles/{{roleId}}"
+          }
+        },
+        {
+          "name": "Update role",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Support Lead Updated\",\n  \"permissionKeys\": [\"users:read:all\"]\n}"
+            },
+            "url": "{{baseUrl}}/roles/{{roleId}}"
+          }
+        },
+        {
+          "name": "Delete role",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/roles/{{roleId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Partners",
+      "item": [
+        {
+          "name": "Public",
+          "auth": { "type": "noauth" },
+          "item": [
+            {
+              "name": "List active partners",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const res = pm.response.json();",
+                      "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                      "if (res.data?.data?.length) {",
+                      "  const partner = res.data.data[0];",
+                      "  pm.collectionVariables.set('partnerId', partner.id);",
+                      "  pm.test('Public shape: includes onboardingFee key', () => {",
+                      "    pm.expect(partner).to.have.property('onboardingFee');",
+                      "  });",
+                      "  pm.test('Public shape: no commission fields', () => {",
+                      "    pm.expect(partner).to.not.have.property('commissionType');",
+                      "    pm.expect(partner).to.not.have.property('commissionValue');",
+                      "    pm.expect(partner).to.not.have.property('onboardPercentage');",
+                      "  });",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/partners?page=1&limit=20",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["partners"],
+                  "query": [
+                    { "key": "page", "value": "1" },
+                    { "key": "limit", "value": "20" }
+                  ]
+                },
+                "description": "Public endpoint. Returns active partners only. Response includes `onboardingFee` but excludes `commissionType`, `commissionValue`, and `onboardPercentage`. Saves first partner `id` to `{{partnerId}}`."
+              }
+            },
+            {
+              "name": "Get partner by ID",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const res = pm.response.json();",
+                      "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                      "const partner = res.data;",
+                      "pm.test('Public shape: includes onboardingFee key', () => {",
+                      "  pm.expect(partner).to.have.property('onboardingFee');",
+                      "});",
+                      "pm.test('Public shape: no commission fields', () => {",
+                      "  pm.expect(partner).to.not.have.property('commissionType');",
+                      "  pm.expect(partner).to.not.have.property('commissionValue');",
+                      "  pm.expect(partner).to.not.have.property('onboardPercentage');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/partners/{{partnerId}}",
+                "description": "Public endpoint. Returns a single **active** partner. Missing, disabled, or unknown IDs return **404**:\n```json\n{ \"status\": false, \"message\": \"Not Found\", \"error\": \"Partner <uuid> not found\" }\n```"
+              }
+            },
+            {
+              "name": "Get partner by ID (404 — not found)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                      "const res = pm.response.json();",
+                      "pm.test('Error envelope', () => {",
+                      "  pm.expect(res.status).to.eql(false);",
+                      "  pm.expect(res.message).to.eql('Not Found');",
+                      "});"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/partners/00000000-0000-0000-0000-000000000000",
+                "description": "Example of a valid UUID that does not exist (or partner is inactive)."
+              }
+            },
+            {
+              "name": "Get partner by ID (400 — invalid UUID)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/partners/not-a-valid-uuid",
+                "description": "Invalid UUID format returns **400** validation error."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Partner portal",
+          "item": [
+            {
+              "name": "Change password (required on first login)",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"currentPassword\": \"TEMP_PASSWORD_FROM_EMAIL\",\n  \"newPassword\": \"NewSecurePass123\"\n}"
+                },
+                "url": "{{baseUrl}}/partners/profile/me/password",
+                "description": "Use the temporary password from the welcome email as `currentPassword`. Clears `mustChangePassword` so other partner routes work."
+              }
+            },
+            {
+              "name": "Update own profile",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"description\": \"Updated partner description\"\n}"
+                },
+                "url": "{{baseUrl}}/partners/profile/me"
+              }
+            },
+            {
+              "name": "List own courses",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/partners/courses?page=1&limit=20"
+              }
+            },
+            {
+              "name": "List own students",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/partners/students?page=1&limit=20"
+              }
+            },
+            {
+              "name": "Revenue summary",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/partners/revenue"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin Partners",
+      "item": [
+        {
+          "name": "Create partner + login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Partner\",\n  \"email\": \"jane@partner.com\",\n  \"phoneNumber\": \"08012345678\",\n  \"onboardingFee\": 5000,\n  \"commissionType\": \"percentage\",\n  \"commissionValue\": 10\n}"
+            },
+            "url": "{{baseUrl}}/admin/partners",
+            "description": "Creates partner profile + login account. Password is optional — if omitted, a secure temporary password is generated and emailed asynchronously. Partner must change password on first login."
+          }
+        },
+        {
+          "name": "Create partner profile only",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Jane\",\n  \"lastName\": \"Partner\",\n  \"email\": \"profile-only@partner.com\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/partners/profile-only"
+          }
+        },
+        {
+          "name": "List partners",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/partners?page=1&limit=20"
+          }
+        },
+        {
+          "name": "Get partner by ID (admin — full fields)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.id) {",
+                  "  pm.collectionVariables.set('partnerId', res.data.id);",
+                  "}",
+                  "pm.test('Admin shape: includes commission fields', () => {",
+                  "  const partner = res.data;",
+                  "  pm.expect(partner).to.have.property('onboardingFee');",
+                  "  pm.expect(partner).to.have.property('commissionType');",
+                  "  pm.expect(partner).to.have.property('commissionValue');",
+                  "  pm.expect(partner).to.have.property('onboardPercentage');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/partners/{{partnerId}}",
+            "description": "Admin endpoint. Returns the full partner record including `onboardingFee`, `commissionType`, `commissionValue`, and `onboardPercentage`. Returns **404** if the partner does not exist."
+          }
+        },
+        {
+          "name": "List students for partner",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/partners/{{partnerId}}/students?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "partners", "{{partnerId}}", "students"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            },
+            "description": "Superadmin/admin with PARTNERS read permission. Returns paginated students registered under the given partner. **404** if partner does not exist."
+          }
+        },
+        {
+          "name": "Update partner",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Updated description\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/partners/{{partnerId}}"
+          }
+        },
+        {
+          "name": "Update partner fees",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"onboardingFee\": 7500,\n  \"commissionType\": \"fixed\",\n  \"commissionValue\": 500\n}"
+            },
+            "url": "{{baseUrl}}/admin/partners/{{partnerId}}/fees",
+            "description": "Superadmin only"
+          }
+        },
+        {
+          "name": "Disable partner",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/admin/partners/{{partnerId}}/disable"
+          }
+        },
+        {
+          "name": "Resend welcome email",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/admin/partners/{{partnerId}}/resend-welcome-email",
+            "description": "Generates a new temporary password, emails it asynchronously, and sets `mustChangePassword` on the partner login account."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Access Codes",
+      "item": [
+        {
+          "name": "Partner — list access codes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/partners/access-codes?page=1&limit=20"
+          }
+        },
+        {
+          "name": "Partner — access code stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/partners/access-codes/stats"
+          }
+        },
+        {
+          "name": "Admin — generate access codes",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"count\": 1000\n}"
+            },
+            "url": "{{baseUrl}}/admin/partners/{{partnerId}}/access-codes",
+            "description": "Superadmin only. Max 20,000 per request. For counts above 50, response returns `{ requested, generated, partnerId }` without listing every code — use List partner access codes to paginate."
+          }
+        },
+        {
+          "name": "Admin — list partner access codes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/partners/{{partnerId}}/access-codes?page=1&limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "partners", "{{partnerId}}", "access-codes"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "50" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Admin — delete unused access codes (by ids)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\"access-code-uuid-here\"]\n}"
+            },
+            "url": "{{baseUrl}}/admin/partners/{{partnerId}}/access-codes",
+            "description": "Deletes only unused codes. Used or student-linked codes are skipped."
+          }
+        },
+        {
+          "name": "Admin — delete all unused access codes",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deleteAllUnused\": true\n}"
+            },
+            "url": "{{baseUrl}}/admin/partners/{{partnerId}}/access-codes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Students",
+      "item": [
+        {
+          "name": "Get my profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/students/me"
+          }
+        },
+        {
+          "name": "List my enrollments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/students/enrollments"
+          }
+        },
+        {
+          "name": "Change password — send OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"email\"\n}"
+            },
+            "url": "{{baseUrl}}/students/change-password/send-otp"
+          }
+        },
+        {
+          "name": "Change password",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"email\",\n  \"code\": \"123456\",\n  \"newPassword\": \"NewSecurePass1\"\n}"
+            },
+            "url": "{{baseUrl}}/students/change-password"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Courses (Student)",
+      "item": [
+        {
+          "name": "List published courses",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/courses"
+          }
+        },
+        {
+          "name": "Get course by slug",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/courses/slug/{{courseSlug}}"
+          }
+        },
+        {
+          "name": "Get course by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/courses/{{courseId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin Courses",
+      "item": [
+        {
+          "name": "List courses",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/courses?page=1&limit=20"
+          }
+        },
+        {
+          "name": "Get course by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/courses/{{courseId}}"
+          }
+        },
+        {
+          "name": "Create course",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"partnerId\": \"{{partnerId}}\",\n  \"title\": \"Introduction to Design\",\n  \"description\": \"A beginner course\",\n  \"price\": 15000,\n  \"discount\": 0,\n  \"isFree\": false\n}"
+            },
+            "url": "{{baseUrl}}/admin/courses"
+          }
+        },
+        {
+          "name": "Update course",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Introduction to Design (Updated)\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/courses/{{courseId}}"
+          }
+        },
+        {
+          "name": "Publish / unpublish course",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"published\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/courses/{{courseId}}/publish"
+          }
+        },
+        {
+          "name": "Disable course",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/admin/courses/{{courseId}}/disable"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Staff Courses",
+      "description": "Same as admin courses but under /courses prefix",
+      "item": [
+        {
+          "name": "Create course",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"partnerId\": \"{{partnerId}}\",\n  \"title\": \"Staff Created Course\",\n  \"price\": 10000\n}"
+            },
+            "url": "{{baseUrl}}/courses"
+          }
+        },
+        {
+          "name": "Update course",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Updated title\"\n}"
+            },
+            "url": "{{baseUrl}}/courses/{{courseId}}"
+          }
+        },
+        {
+          "name": "Publish / unpublish",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"published\"\n}"
+            },
+            "url": "{{baseUrl}}/courses/{{courseId}}/publish"
+          }
+        },
+        {
+          "name": "Disable course",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": "{{baseUrl}}/courses/{{courseId}}/disable"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Course Videos",
+      "item": [
+        {
+          "name": "List videos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/courses/{{courseId}}/videos"
+          }
+        },
+        {
+          "name": "Add video",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Lesson 1\",\n  \"vimeoUrl\": \"https://vimeo.com/123456789\",\n  \"position\": 0,\n  \"duration\": \"12:30\"\n}"
+            },
+            "url": "{{baseUrl}}/courses/{{courseId}}/videos"
+          }
+        },
+        {
+          "name": "Update video",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Lesson 1 (Updated)\"\n}"
+            },
+            "url": "{{baseUrl}}/courses/{{courseId}}/videos/{{videoId}}"
+          }
+        },
+        {
+          "name": "Delete video",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/courses/{{courseId}}/videos/{{videoId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Settings",
+      "item": [
+        {
+          "name": "Public — get onboarding fee",
+          "auth": { "type": "noauth" },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/settings/onboarding-fee"
+          }
+        },
+        {
+          "name": "Admin — get onboarding fee",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/settings/onboarding-fee"
+          }
+        },
+        {
+          "name": "Admin — update onboarding fee",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 10000,\n  \"currency\": \"NGN\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/settings/onboarding-fee"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "Verify payment",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transactionId\": \"1234567\"\n}"
+            },
+            "url": "{{baseUrl}}/payments/verify",
+            "description": "**Student auth required** (Bearer `{{accessToken}}` from Student Login). Use after login for course payments or legacy onboarding flows. For new signups, use **Student verify onboarding payment** (public) or the Flutterwave webhook before login."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Onboarding",
+      "item": [
+        {
+          "name": "Get onboarding status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/onboarding/status",
+            "description": "Student auth required"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "Flutterwave webhook",
+          "auth": { "type": "noauth" },
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "verif-hash", "value": "{{flutterwaveSecretHash}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"charge.completed\",\n  \"data\": {\n    \"id\": 1234567,\n    \"tx_ref\": \"tx-ref-example\",\n    \"status\": \"successful\"\n  }\n}"
+            },
+            "url": "{{baseUrl}}/webhooks/flutterwave"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin Payments",
+      "item": [
+        {
+          "name": "Sync Flutterwave transactions (default 3 days)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/payments/sync/flutterwave?days=7",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "payments", "sync", "flutterwave"],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "7",
+                  "description": "Optional. Days back to sync (default 3, max 30). Remove or change as needed."
+                }
+              ]
+            },
+            "description": "**Superadmin only.** Fetches successful Flutterwave transactions and idempotently fulfills onboarding or course payments. Default window is **3 days**; override with `?days=7` for recovery."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin Reports",
+      "item": [
+        {
+          "name": "List students",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/students?page=1&limit=20"
+          }
+        },
+        {
+          "name": "List enrollments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/enrollments?page=1&limit=20"
+          }
+        },
+        {
+          "name": "Onboarding payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/payments/onboarding?page=1&limit=20"
+          }
+        },
+        {
+          "name": "Course payments",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/payments/courses?page=1&limit=20"
+          }
+        }
+      ]
+    }
+  ]
+}

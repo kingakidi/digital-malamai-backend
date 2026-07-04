@@ -1,10 +1,13 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
 import { AbacService } from '../common/abac/abac.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
@@ -17,13 +20,16 @@ import {
   PermissionScope,
   RoleName,
 } from '../common/types/permission.types';
+import { generateTemporaryPassword } from '../common/utils/password.util';
 import {
   buildPaginatedResult,
   getPaginationSkip,
 } from '../common/utils/pagination.util';
 import { STAFF_ACCOUNT_ROLES } from '../common/constants/staff-roles.constants';
+import { AccountWelcomeService } from '../mail/account-welcome.service';
 import { RolesService } from '../roles/roles.service';
 import { AdminPatchUserDto } from './dto/admin-patch-user.dto';
+import { CreateStaffUserDto } from './dto/create-staff-user.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { User } from './entities/user.entity';
@@ -42,6 +48,7 @@ export class UserService {
   constructor(
     private readonly rolesService: RolesService,
     private readonly abacService: AbacService,
+    private readonly accountWelcomeService: AccountWelcomeService,
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
   ) {}
@@ -49,11 +56,25 @@ export class UserService {
   async create(createUserDto: CreateUserDto): Promise<User> {
     const role = await this.rolesService.findEntityById(createUserDto.roleId);
 
+    if (
+      (STAFF_ACCOUNT_ROLES as readonly RoleName[]).includes(
+        role.name as RoleName,
+      )
+    ) {
+      throw new ForbiddenException(
+        'Staff accounts can only be created by a superadmin via POST /admin/users',
+      );
+    }
+
+    const normalizedEmail = createUserDto.email.trim().toLowerCase();
+    await this.assertEmailAvailable(normalizedEmail);
+
     const user = this.usersRepository.create({
       firstName: createUserDto.firstName,
       lastName: createUserDto.lastName,
-      email: createUserDto.email,
+      email: normalizedEmail,
       password: createUserDto.password,
+      mustChangePassword: false,
       role,
       partnerId: createUserDto.partnerId ?? null,
     });
@@ -61,17 +82,143 @@ export class UserService {
     return this.usersRepository.save(user);
   }
 
-  async createStaffAccount(createUserDto: CreateUserDto): Promise<User> {
-    const role = await this.rolesService.findEntityById(createUserDto.roleId);
+  async createStaffAccount(dto: CreateStaffUserDto): Promise<User> {
+    const role = await this.rolesService.findEntityById(dto.roleId);
     this.assertStaffRole(role.name as RoleName);
 
-    if (role.name === RoleName.PARTNER && !createUserDto.partnerId) {
+    if (role.name === RoleName.PARTNER) {
       throw new BadRequestException(
-        'partnerId is required when creating a partner login account',
+        'Partner accounts must be created via POST /admin/partners',
       );
     }
 
-    return this.create(createUserDto);
+    if (role.name === RoleName.SUPERADMIN) {
+      throw new BadRequestException(
+        'Superadmin accounts cannot be created via this endpoint',
+      );
+    }
+
+    const normalizedEmail = dto.email.trim().toLowerCase();
+    await this.assertEmailAvailable(normalizedEmail);
+
+    const plainPassword = dto.password?.trim() || generateTemporaryPassword();
+
+    const user = this.usersRepository.create({
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      email: normalizedEmail,
+      password: plainPassword,
+      mustChangePassword: true,
+      role,
+      partnerId: null,
+    });
+
+    const savedUser = await this.usersRepository.save(user);
+    this.accountWelcomeService.dispatchStaffWelcomeEmail(savedUser, plainPassword);
+
+    return savedUser;
+  }
+
+  async resendStaffWelcomeEmail(userId: string) {
+    const user = await this.findByIdWithRole(userId);
+
+    if (!user) {
+      throw new NotFoundException(`User ${userId} not found`);
+    }
+
+    if (user.role.name === RoleName.STUDENT) {
+      throw new BadRequestException(
+        'Welcome emails are not sent for student accounts',
+      );
+    }
+
+    if (user.role.name === RoleName.PARTNER) {
+      throw new BadRequestException(
+        'Resend partner welcome emails via POST /admin/partners/:id/resend-welcome-email',
+      );
+    }
+
+    if (user.role.name === RoleName.SUPERADMIN) {
+      throw new BadRequestException(
+        'Welcome emails cannot be resent for superadmin accounts',
+      );
+    }
+
+    const plainPassword = generateTemporaryPassword();
+    const updatedUser = await this.setPassword(user.id, plainPassword, {
+      mustChangePassword: true,
+    });
+
+    this.accountWelcomeService.dispatchStaffWelcomeEmail(
+      updatedUser,
+      plainPassword,
+    );
+
+    return { message: 'Welcome email has been queued' };
+  }
+
+  async changePasswordWithCurrent(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ) {
+    const user = await this.findByIdWithRole(userId);
+
+    if (!user?.password) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (user.role.name === RoleName.STUDENT) {
+      throw new BadRequestException(
+        'Students should change password via /students/change-password',
+      );
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+
+    if (!isMatch) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    await this.setPassword(user.id, newPassword, { mustChangePassword: false });
+
+    return { message: 'Password changed successfully' };
+  }
+
+  async createSuperadminSeedUser(dto: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    password: string;
+    roleId: string;
+  }): Promise<User> {
+    const normalizedEmail = dto.email.trim().toLowerCase();
+    await this.assertEmailAvailable(normalizedEmail);
+
+    const role = await this.rolesService.findEntityById(dto.roleId);
+
+    const user = this.usersRepository.create({
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      email: normalizedEmail,
+      password: dto.password,
+      mustChangePassword: false,
+      role,
+      partnerId: null,
+    });
+
+    return this.usersRepository.save(user);
+  }
+
+  async assertEmailAvailable(
+    email: string,
+    excludeUserId?: string,
+  ): Promise<void> {
+    const existing = await this.findByEmail(email);
+
+    if (existing && existing.id !== excludeUserId) {
+      throw new ConflictException('Email already exists');
+    }
   }
 
   async findAllStaff(
@@ -151,7 +298,9 @@ export class UserService {
     }
 
     if (dto.email !== undefined) {
-      user.email = dto.email;
+      const normalizedEmail = dto.email.trim().toLowerCase();
+      await this.assertEmailAvailable(normalizedEmail, user.id);
+      user.email = normalizedEmail;
     }
 
     if (dto.partnerId !== undefined) {
@@ -225,10 +374,40 @@ export class UserService {
   }
 
   findByEmail(email: string): Promise<User | null> {
-    return this.usersRepository.findOne({
-      where: { email },
-      relations: ['role'],
-    });
+    return this.usersRepository
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.role', 'role')
+      .where('LOWER(user.email) = LOWER(:email)', { email: email.trim() })
+      .getOne();
+  }
+
+  findPartnerLoginByPartnerId(partnerId: string): Promise<User | null> {
+    return this.usersRepository
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.role', 'role')
+      .where('user.partnerId = :partnerId', { partnerId })
+      .andWhere('role.name = :roleName', { roleName: RoleName.PARTNER })
+      .getOne();
+  }
+
+  async setPassword(
+    userId: string,
+    plainPassword: string,
+    options?: { mustChangePassword?: boolean },
+  ): Promise<User> {
+    const user = await this.findByIdWithRole(userId);
+
+    if (!user) {
+      throw new NotFoundException(`User ${userId} not found`);
+    }
+
+    user.password = await bcrypt.hash(plainPassword, 10);
+
+    if (options?.mustChangePassword !== undefined) {
+      user.mustChangePassword = options.mustChangePassword;
+    }
+
+    return this.usersRepository.save(user);
   }
 
   findByPhone(phone: string): Promise<User | null> {
@@ -274,7 +453,9 @@ export class UserService {
       user.lastName = updateUserDto.lastName;
     }
     if (updateUserDto.email !== undefined) {
-      user.email = updateUserDto.email;
+      const normalizedEmail = updateUserDto.email.trim().toLowerCase();
+      await this.assertEmailAvailable(normalizedEmail, user.id);
+      user.email = normalizedEmail;
     }
     if (updateUserDto.partnerId !== undefined) {
       user.partnerId = updateUserDto.partnerId;

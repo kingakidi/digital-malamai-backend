@@ -1,8 +1,13 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { buildRolePermissionView } from '../common/utils/permission.util';
+import { PaidFor } from '../common/types/payment.types';
+import { PaymentEligibilityService } from '../payments/payment-eligibility.service';
+import { CheckPaymentEligibilityDto } from '../payments/dto/check-payment-eligibility.dto';
+import { PaymentFulfillmentService } from '../payments/payment-fulfillment.service';
+import { VerifyOnboardingPaymentDto } from '../payments/dto/verify-onboarding-payment.dto';
 import { StudentsService } from '../students/students.service';
 import { UserService } from '../user/user.service';
 import { RegisterStudentDto } from './dto/register-student.dto';
@@ -14,6 +19,8 @@ export class AuthService {
   constructor(
     private readonly userService: UserService,
     private readonly studentsService: StudentsService,
+    private readonly paymentFulfillmentService: PaymentFulfillmentService,
+    private readonly paymentEligibilityService: PaymentEligibilityService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
@@ -43,12 +50,58 @@ export class AuthService {
   }
 
   registerStudent(dto: RegisterStudentDto) {
+    return this.registerStudentWithEligibility(dto);
+  }
+
+  async registerStudentWithEligibility(dto: RegisterStudentDto) {
+    const eligibility = await this.paymentEligibilityService.checkEligibility({
+      email: dto.email,
+      paidFor: PaidFor.ONBOARDING,
+      partnerId: dto.partnerId,
+    });
+
+    if (!eligibility.eligible) {
+      throw new ConflictException(eligibility.message);
+    }
+
     return this.studentsService.register(dto);
+  }
+
+  verifyOnboardingPayment(dto: VerifyOnboardingPaymentDto) {
+    return this.paymentFulfillmentService.verifyAndFulfill({
+      transactionId: dto.transactionId,
+      txRef: dto.txRef,
+      source: 'api',
+      forcedPaidFor: PaidFor.ONBOARDING,
+      registrationFallback: {
+        email: dto.email,
+        partnerId: dto.partnerId,
+        accessCode: dto.accessCode,
+        fullName: dto.fullName,
+        phone: dto.phone,
+      },
+    });
+  }
+
+  requeryOnboardingPayment(dto: VerifyOnboardingPaymentDto) {
+    return this.verifyOnboardingPayment(dto);
+  }
+
+  checkPaymentEligibility(dto: CheckPaymentEligibilityDto) {
+    return this.paymentEligibilityService.checkEligibility(dto);
   }
 
   async studentLogin(dto: StudentSignInDto) {
     const user = await this.studentsService.login(dto);
     return this.buildAuthResponse(user);
+  }
+
+  changePassword(userId: string, dto: { currentPassword: string; newPassword: string }) {
+    return this.userService.changePasswordWithCurrent(
+      userId,
+      dto.currentPassword,
+      dto.newPassword,
+    );
   }
 
   private async buildAuthResponse(user: Awaited<ReturnType<UserService['findByEmail']>>) {

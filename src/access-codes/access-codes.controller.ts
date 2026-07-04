@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Post,
   Query,
   UseGuards,
@@ -30,7 +32,10 @@ import {
   ApiOkPaginated,
   AccessCodeResponseDto,
   AccessCodeStatsResponseDto,
+  DeleteAccessCodesResultDto,
+  GenerateAccessCodesResultDto,
 } from '../common/swagger';
+import { DeleteAccessCodesDto } from './dto/delete-access-codes.dto';
 import { GenerateAccessCodesDto } from './dto/generate-access-codes.dto';
 import { AccessCodesService } from './access-codes.service';
 
@@ -69,16 +74,46 @@ export class PartnerAccessCodesController {
 export class AdminAccessCodesController {
   constructor(private readonly accessCodesService: AccessCodesService) {}
 
+  @Get(':partnerId/access-codes')
+  @ApiOkPaginated(AccessCodeResponseDto)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.READ)
+  @ResponseMessage('Partner access codes retrieved successfully')
+  findForPartner(
+    @Param('partnerId', ParseUUIDPipe) partnerId: string,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.accessCodesService.findForPartner(partnerId, query);
+  }
+
+  @Get(':partnerId/access-codes/stats')
+  @ApiOkData(AccessCodeStatsResponseDto)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.READ)
+  @ResponseMessage('Partner access code stats retrieved successfully')
+  getStats(@Param('partnerId', ParseUUIDPipe) partnerId: string) {
+    return this.accessCodesService.getStatsForPartner(partnerId);
+  }
+
   @Post(':partnerId/access-codes')
   @HttpCode(HttpStatus.CREATED)
-  @ApiCreatedData(AccessCodeResponseDto, { isArray: true })
+  @ApiCreatedData(GenerateAccessCodesResultDto)
   @RequireRole(RoleName.SUPERADMIN)
   @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.CREATE)
   @ResponseMessage('Access codes generated successfully')
   generate(
-    @Param('partnerId') partnerId: string,
+    @Param('partnerId', ParseUUIDPipe) partnerId: string,
     @Body() dto: GenerateAccessCodesDto,
   ) {
     return this.accessCodesService.generateForPartner(partnerId, dto);
+  }
+
+  @Delete(':partnerId/access-codes')
+  @ApiOkData(DeleteAccessCodesResultDto)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.DELETE)
+  @ResponseMessage('Unused access codes deleted successfully')
+  deleteUnused(
+    @Param('partnerId', ParseUUIDPipe) partnerId: string,
+    @Body() dto: DeleteAccessCodesDto,
+  ) {
+    return this.accessCodesService.deleteForPartner(partnerId, dto);
   }
 }

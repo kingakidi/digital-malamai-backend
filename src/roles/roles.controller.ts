@@ -7,6 +7,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Put,
   Post,
   Query,
@@ -85,7 +86,7 @@ export class RolesController {
   @ApiOkData(RoleResponseDto)
   @RequirePermission(PermissionResource.ROLES, PermissionAction.READ)
   @ResponseMessage('Role retrieved successfully')
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.rolesService.findOne(id);
   }
 
@@ -93,7 +94,7 @@ export class RolesController {
   @ApiOkData(RoleResponseDto)
   @RequirePermission(PermissionResource.ROLES, PermissionAction.UPDATE)
   @ResponseMessage('Role updated successfully')
-  update(@Param('id') id: string, @Body() updateRoleDto: UpdateRoleDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() updateRoleDto: UpdateRoleDto) {
     return this.rolesService.update(id, updateRoleDto);
   }
 
@@ -101,7 +102,7 @@ export class RolesController {
   @ApiOkNull()
   @RequirePermission(PermissionResource.ROLES, PermissionAction.DELETE)
   @ResponseMessage('Role deleted successfully')
-  async remove(@Param('id') id: string) {
+  async remove(@Param('id', ParseUUIDPipe) id: string) {
     await this.rolesService.remove(id);
     return null;
   }

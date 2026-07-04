@@ -1,12 +1,12 @@
 import {
   Body,
-  ConflictException,
   Controller,
   Delete,
   Get,
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Put,
   Post,
   Query,
@@ -48,11 +48,6 @@ export class UserController {
   @RequirePermission(PermissionResource.USERS, PermissionAction.CREATE)
   @ResponseMessage('User created successfully')
   async create(@Body() createUserDto: CreateUserDto) {
-    const existing = await this.userService.findByEmail(createUserDto.email);
-    if (existing) {
-      throw new ConflictException('Email already exists');
-    }
-
     const user = await this.userService.create(createUserDto);
     return this.userService.sanitizeUser(user);
   }
@@ -77,7 +72,7 @@ export class UserController {
   @RequirePermission(PermissionResource.USERS, PermissionAction.READ)
   @ResponseMessage('User retrieved successfully')
   async findOne(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
     const found = await this.userService.findOne(id, user);
@@ -89,7 +84,7 @@ export class UserController {
   @RequirePermission(PermissionResource.USERS, PermissionAction.UPDATE)
   @ResponseMessage('User updated successfully')
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() updateUserDto: UpdateUserDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
@@ -102,7 +97,7 @@ export class UserController {
   @RequirePermission(PermissionResource.USERS, PermissionAction.DELETE)
   @ResponseMessage('User deleted successfully')
   async remove(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
     await this.userService.remove(id, user);

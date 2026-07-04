@@ -10,6 +10,7 @@ import { PaginatedResult } from '../common/interfaces/pagination.interface';
 import { PartnerStatus } from '../common/types/partner-status.type';
 import { RoleName } from '../common/types/permission.types';
 import { SortOrder } from '../common/types/sort-order.type';
+import { generateTemporaryPassword } from '../common/utils/password.util';
 import {
   buildPaginatedResult,
   getPaginationSkip,
@@ -17,11 +18,15 @@ import {
 import { RolesService } from '../roles/roles.service';
 import { User } from '../user/entities/user.entity';
 import { UserService } from '../user/user.service';
+import { ChangePartnerPasswordDto } from './dto/change-partner-password.dto';
 import { CreatePartnerWithUserDto } from './dto/create-partner-with-user.dto';
 import { CreatePartnerDto } from './dto/create-partner.dto';
 import { UpdatePartnerFeesDto } from './dto/update-partner-fees.dto';
 import { UpdatePartnerDto } from './dto/update-partner.dto';
 import { Partner } from './entities/partner.entity';
+import { PublicPartnerView } from './types/public-partner-view.type';
+import { toPublicPartner } from './utils/partner-view.util';
+import { AccountWelcomeService } from '../mail/account-welcome.service';
 
 const ALLOWED_SORT_FIELDS = [
   'id',
@@ -40,19 +45,25 @@ export class PartnersService {
     private readonly dataSource: DataSource,
     private readonly rolesService: RolesService,
     private readonly userService: UserService,
+    private readonly accountWelcomeService: AccountWelcomeService,
   ) {}
 
   async create(createPartnerDto: CreatePartnerDto): Promise<Partner> {
-    const partner = this.partnersRepository.create(createPartnerDto);
+    const normalizedEmail = createPartnerDto.email.trim().toLowerCase();
+    await this.assertPartnerEmailAvailable(normalizedEmail);
+    await this.userService.assertEmailAvailable(normalizedEmail);
+
+    const partner = this.partnersRepository.create({
+      ...createPartnerDto,
+      email: normalizedEmail,
+    });
     return this.partnersRepository.save(partner);
   }
 
   async createWithUser(dto: CreatePartnerWithUserDto) {
-    const existingUser = await this.userService.findByEmail(dto.email.toLowerCase());
-
-    if (existingUser) {
-      throw new ConflictException('A user with this email already exists');
-    }
+    const normalizedEmail = dto.email.trim().toLowerCase();
+    await this.assertPartnerEmailAvailable(normalizedEmail);
+    await this.userService.assertEmailAvailable(normalizedEmail);
 
     const partnerRole = await this.rolesService.findByName(RoleName.PARTNER);
 
@@ -60,11 +71,13 @@ export class PartnersService {
       throw new NotFoundException('Partner role is not configured');
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    const plainPassword = dto.password?.trim() || generateTemporaryPassword();
+
+    const result = await this.dataSource.transaction(async (manager) => {
       const partner = manager.create(Partner, {
         firstName: dto.firstName,
         lastName: dto.lastName,
-        email: dto.email.toLowerCase(),
+        email: normalizedEmail,
         phoneNumber: dto.phoneNumber ?? null,
         address: dto.address ?? null,
         description: dto.description ?? null,
@@ -81,8 +94,9 @@ export class PartnersService {
       const user = manager.create(User, {
         firstName: dto.firstName,
         lastName: dto.lastName,
-        email: dto.email.toLowerCase(),
-        password: dto.password,
+        email: normalizedEmail,
+        password: plainPassword,
+        mustChangePassword: true,
         role: partnerRole,
         partnerId: savedPartner.id,
       });
@@ -91,14 +105,56 @@ export class PartnersService {
 
       return {
         partner: savedPartner,
-        user: this.userService.sanitizeUser(savedUser),
+        user: savedUser,
       };
     });
+
+    this.accountWelcomeService.dispatchPartnerWelcomeEmail(
+      result.user,
+      plainPassword,
+    );
+
+    return {
+      partner: result.partner,
+      user: this.userService.sanitizeUser(result.user),
+    };
+  }
+
+  async resendWelcomeEmail(partnerId: string) {
+    await this.findOneEntity(partnerId);
+
+    const user = await this.userService.findPartnerLoginByPartnerId(partnerId);
+
+    if (!user) {
+      throw new NotFoundException(
+        `No partner login account is linked to partner ${partnerId}`,
+      );
+    }
+
+    const plainPassword = generateTemporaryPassword();
+    const updatedUser = await this.userService.setPassword(user.id, plainPassword, {
+      mustChangePassword: true,
+    });
+
+    this.accountWelcomeService.dispatchPartnerWelcomeEmail(
+      updatedUser,
+      plainPassword,
+    );
+
+    return { message: 'Welcome email has been queued' };
+  }
+
+  async changeOwnPassword(userId: string, dto: ChangePartnerPasswordDto) {
+    return this.userService.changePasswordWithCurrent(
+      userId,
+      dto.currentPassword,
+      dto.newPassword,
+    );
   }
 
   async findAllActive(
     query: PaginationQueryDto,
-  ): Promise<PaginatedResult<Partner>> {
+  ): Promise<PaginatedResult<PublicPartnerView>> {
     const skip = getPaginationSkip(query.page, query.limit);
     const sortBy = ALLOWED_SORT_FIELDS.includes(query.sortBy ?? '')
       ? query.sortBy!
@@ -120,7 +176,12 @@ export class PartnersService {
       .take(query.limit);
 
     const [items, total] = await qb.getManyAndCount();
-    return buildPaginatedResult(items, total, query);
+
+    return buildPaginatedResult(
+      items.map((partner) => toPublicPartner(partner)),
+      total,
+      query,
+    );
   }
 
   async findAll(
@@ -152,6 +213,18 @@ export class PartnersService {
     return this.findOneEntity(id);
   }
 
+  async findOnePublic(id: string): Promise<PublicPartnerView> {
+    const partner = await this.partnersRepository.findOne({
+      where: { id, status: PartnerStatus.ACTIVE },
+    });
+
+    if (!partner) {
+      throw new NotFoundException(`Partner ${id} not found`);
+    }
+
+    return toPublicPartner(partner);
+  }
+
   async findOneEntity(id: string): Promise<Partner> {
     const partner = await this.partnersRepository.findOneBy({ id });
 
@@ -164,8 +237,32 @@ export class PartnersService {
 
   async update(id: string, updatePartnerDto: UpdatePartnerDto): Promise<Partner> {
     const partner = await this.findOneEntity(id);
-    Object.assign(partner, updatePartnerDto);
+
+    if (updatePartnerDto.email !== undefined) {
+      const normalizedEmail = updatePartnerDto.email.trim().toLowerCase();
+      await this.assertPartnerEmailAvailable(normalizedEmail, id);
+      await this.userService.assertEmailAvailable(normalizedEmail);
+      partner.email = normalizedEmail;
+    }
+
+    const { email: _email, ...rest } = updatePartnerDto;
+    Object.assign(partner, rest);
+
     return this.partnersRepository.save(partner);
+  }
+
+  async assertPartnerEmailAvailable(
+    email: string,
+    excludePartnerId?: string,
+  ): Promise<void> {
+    const existing = await this.partnersRepository
+      .createQueryBuilder('partner')
+      .where('LOWER(partner.email) = LOWER(:email)', { email: email.trim() })
+      .getOne();
+
+    if (existing && existing.id !== excludePartnerId) {
+      throw new ConflictException('A partner with this email already exists');
+    }
   }
 
   async updateFees(id: string, dto: UpdatePartnerFeesDto): Promise<Partner> {

@@ -1,7 +1,9 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -15,6 +17,7 @@ import {
 import {
   FlutterwaveVerifyData,
   PaidFor,
+  PaymentMetadata,
   PaymentPlatform,
   PaymentStatus,
 } from '../common/types/payment.types';
@@ -27,13 +30,23 @@ import { PhoneMessagingService } from '../mail/phone-messaging.service';
 import { Partner } from '../partners/entities/partner.entity';
 import { PartnersService } from '../partners/partners.service';
 import { SettingsService } from '../settings/settings.service';
+import { StudentsService } from '../students/students.service';
+import { OnboardingRegistrationInput } from '../students/types/onboarding-registration.type';
 import { User } from '../user/entities/user.entity';
 import { UserService } from '../user/user.service';
 import { PaymentTransaction } from './entities/payment-transaction.entity';
+import { PaymentWebhookEvent } from './entities/payment-webhook-event.entity';
 import { FlutterwaveService } from './flutterwave.service';
+import { PaymentDebugLogger } from './payment-debug.logger';
+import {
+  buildFlutterwaveDataFromWebhook,
+  isSuccessfulWebhookStatus,
+  isWebhookFulfillmentComplete,
+  parseFlutterwaveWebhookPayload,
+} from './utils/flutterwave-webhook.util';
 import {
   calculatePartnerCut,
-  isOnboardingEligible,
+  mergePaymentMetadata,
   normalizePaidFor,
   parsePaymentMetadata,
   roundMoney,
@@ -42,11 +55,18 @@ import {
 export interface VerifyPaymentInput {
   transactionId?: string;
   txRef?: string;
-  source: 'api' | 'webhook';
+  flutterwaveData?: FlutterwaveVerifyData;
+  source: 'api' | 'webhook' | 'sync';
+  requestingStudentEmail?: string;
+  forcedPaidFor?: PaidFor;
+  registrationFallback?: Partial<OnboardingRegistrationInput>;
+  webhookMeta?: PaymentMetadata;
 }
 
 @Injectable()
 export class PaymentFulfillmentService {
+  private readonly logger = new Logger(PaymentFulfillmentService.name);
+
   constructor(
     private readonly dataSource: DataSource,
     private readonly flutterwaveService: FlutterwaveService,
@@ -57,64 +77,170 @@ export class PaymentFulfillmentService {
     private readonly notificationsService: NotificationsService,
     private readonly mailService: MailService,
     private readonly phoneMessagingService: PhoneMessagingService,
+    private readonly studentsService: StudentsService,
+    private readonly paymentDebugLogger: PaymentDebugLogger,
     @InjectRepository(PaymentTransaction)
     private readonly transactionsRepository: Repository<PaymentTransaction>,
+    @InjectRepository(PaymentWebhookEvent)
+    private readonly webhookEventsRepository: Repository<PaymentWebhookEvent>,
   ) {}
 
   async verifyAndFulfill(input: VerifyPaymentInput) {
-    const flutterwaveData = await this.resolveFlutterwaveData(input);
-
-    if (!this.flutterwaveService.isSuccessfulPayment(flutterwaveData)) {
-      throw new BadRequestException('Payment was not successful');
-    }
-
-    const existing = await this.transactionsRepository.findOne({
-      where: {
-        paymentPlatform: PaymentPlatform.FLUTTERWAVE,
-        externalTransactionId: String(flutterwaveData.id),
-      },
-      relations: ['user', 'course'],
+    await this.paymentDebugLogger.log('verify.request', {
+      source: input.source,
+      transactionId: input.transactionId ?? null,
+      txRef: input.txRef ?? null,
+      forcedPaidFor: input.forcedPaidFor ?? null,
+      registrationFallback: input.registrationFallback ?? null,
+      webhookMeta: input.webhookMeta ?? null,
     });
 
-    if (existing?.fulfillmentCompleted) {
-      return this.serializeTransaction(existing);
+    try {
+      const result = await this.processVerification(input);
+      await this.paymentDebugLogger.log('verify.response', {
+        source: input.source,
+        success: true,
+        result,
+      });
+      return result;
+    } catch (error) {
+      await this.paymentDebugLogger.log('verify.error', {
+        source: input.source,
+        transactionId: input.transactionId ?? null,
+        txRef: input.txRef ?? null,
+        error:
+          error instanceof Error
+            ? { name: error.name, message: error.message, stack: error.stack }
+            : String(error),
+      });
+      throw error;
+    }
+  }
+
+  async handleWebhookPayload(payload: Record<string, unknown>) {
+    const parsed = parseFlutterwaveWebhookPayload(payload);
+
+    await this.paymentDebugLogger.logWebhook('webhook.request', {
+      webhookEventId: parsed.webhookEventId,
+      eventType: parsed.eventType,
+      eventStatus: parsed.eventStatus,
+      transactionId: parsed.transactionId,
+      txRef: parsed.txRef,
+      meta: parsed.meta,
+      customer: parsed.customer,
+      payload,
+    });
+
+    const existingEvent = await this.webhookEventsRepository.findOne({
+      where: { webhookEventId: parsed.webhookEventId },
+    });
+
+    if (
+      existingEvent?.processingResult &&
+      isWebhookFulfillmentComplete(
+        existingEvent.processingResult as Record<string, unknown>,
+      )
+    ) {
+      await this.paymentDebugLogger.logWebhook('webhook.duplicate_skipped', {
+        webhookEventId: parsed.webhookEventId,
+        eventStatus: parsed.eventStatus,
+        processingResult: existingEvent.processingResult,
+      });
+      return existingEvent.processingResult;
     }
 
-    const parsedMetadata = parsePaymentMetadata(flutterwaveData.meta);
-    const paidFor = normalizePaidFor(parsedMetadata.paidFor);
-    const email = (
-      parsedMetadata.email ?? flutterwaveData.customer?.email
-    )?.toLowerCase();
+    const webhookEvent =
+      existingEvent ??
+      this.webhookEventsRepository.create({
+        webhookEventId: parsed.webhookEventId,
+        eventType: parsed.eventType,
+        eventStatus: parsed.eventStatus,
+        externalTransactionId: parsed.transactionId,
+        txRef: parsed.txRef,
+        rawPayload: payload,
+      });
 
-    if (!email) {
-      throw new BadRequestException(
-        'Payment metadata must include email to link the transaction',
+    webhookEvent.eventStatus = parsed.eventStatus;
+    webhookEvent.externalTransactionId = parsed.transactionId;
+    webhookEvent.txRef = parsed.txRef;
+    webhookEvent.rawPayload = payload;
+
+    await this.webhookEventsRepository.save(webhookEvent);
+
+    if (!isSuccessfulWebhookStatus(parsed.eventStatus)) {
+      const skipped = {
+        skipped: true,
+        reason: 'Webhook status is not successful',
+        eventStatus: parsed.eventStatus,
+        eventType: parsed.eventType,
+      };
+      webhookEvent.processingResult = skipped;
+      await this.webhookEventsRepository.save(webhookEvent);
+      await this.paymentDebugLogger.logWebhook('webhook.skipped', skipped);
+      this.logger.warn(
+        `Webhook skipped for ${parsed.webhookEventId}: status=${parsed.eventStatus}`,
       );
+      return skipped;
     }
 
-    const user = await this.userService.findByEmail(email);
-
-    if (!user || user.role.name !== RoleName.STUDENT) {
-      throw new NotFoundException('Student account not found for payment email');
+    if (!parsed.transactionId && !parsed.txRef) {
+      const error = {
+        success: false,
+        error: 'Webhook payload is missing transaction id or reference',
+      };
+      webhookEvent.processingResult = error;
+      await this.webhookEventsRepository.save(webhookEvent);
+      await this.paymentDebugLogger.logWebhook('webhook.error', error);
+      throw new BadRequestException(error.error);
     }
 
-    if (paidFor === PaidFor.ONBOARDING) {
-      return this.fulfillOnboarding(
-        user,
+    try {
+      const flutterwaveData = buildFlutterwaveDataFromWebhook(payload, parsed);
+      const registrationFallback = this.buildRegistrationFallback(
+        parsed.meta,
+        parsed.customer,
+      );
+
+      this.logger.log(
+        `Fulfilling webhook ${parsed.webhookEventId} txRef=${parsed.txRef} transactionId=${parsed.transactionId}`,
+      );
+
+      const result = await this.verifyAndFulfill({
         flutterwaveData,
-        parsedMetadata as Record<string, unknown>,
-        input.source,
-        existing,
-      );
-    }
+        txRef: parsed.txRef ?? undefined,
+        transactionId:
+          !parsed.txRef && parsed.transactionId
+            ? parsed.transactionId
+            : undefined,
+        source: 'webhook',
+        webhookMeta: parsed.meta,
+        registrationFallback,
+      });
 
-    return this.fulfillCourse(
-      user,
-      flutterwaveData,
-      parsedMetadata as Record<string, unknown>,
-      input.source,
-      existing,
-    );
+      webhookEvent.processingResult = result as Record<string, unknown>;
+      await this.webhookEventsRepository.save(webhookEvent);
+      await this.paymentDebugLogger.logWebhook('webhook.response', {
+        webhookEventId: parsed.webhookEventId,
+        result,
+      });
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      webhookEvent.processingResult = {
+        success: false,
+        error: message,
+      };
+      await this.webhookEventsRepository.save(webhookEvent);
+      await this.paymentDebugLogger.logWebhook('webhook.error', {
+        webhookEventId: parsed.webhookEventId,
+        error: message,
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      this.logger.error(
+        `Webhook fulfillment failed for ${parsed.webhookEventId}: ${message}`,
+      );
+      throw error;
+    }
   }
 
   async getOnboardingStatus(userId: string) {
@@ -146,24 +272,129 @@ export class PaymentFulfillmentService {
     };
   }
 
-  private async fulfillOnboarding(
-    user: User,
-    flutterwaveData: FlutterwaveVerifyData,
-    metadata: Record<string, unknown>,
-    source: 'api' | 'webhook',
-    existing: PaymentTransaction | null,
-  ) {
-    if (!isOnboardingEligible(user.onboardingStatus)) {
+  private async processVerification(input: VerifyPaymentInput) {
+    const flutterwaveData =
+      input.flutterwaveData ?? (await this.resolveFlutterwaveData(input));
+
+    await this.paymentDebugLogger.log('verify.flutterwave_data', {
+      source: input.source,
+      flutterwaveData,
+    });
+
+    if (!this.flutterwaveService.isSuccessfulPayment(flutterwaveData)) {
+      throw new BadRequestException('Payment was not successful');
+    }
+
+    const existing = await this.findExistingTransaction(flutterwaveData);
+
+    if (existing?.fulfillmentCompleted) {
+      return {
+        ...this.serializeTransaction(existing),
+        alreadyFulfilled: true,
+        studentAlreadyRegistered: true,
+      };
+    }
+
+    const metadata = mergePaymentMetadata(
+      parsePaymentMetadata(flutterwaveData.meta),
+      input.webhookMeta,
+      input.registrationFallback,
+    );
+
+    const paidFor = normalizePaidFor(metadata.paidFor, input.forcedPaidFor);
+
+    const email = (
+      metadata.email ??
+      flutterwaveData.customer?.email ??
+      input.registrationFallback?.email
+    )?.toLowerCase();
+
+    if (!email) {
       throw new BadRequestException(
-        'Student must verify email or phone before onboarding payment',
+        'Payment metadata must include email to link the transaction',
       );
     }
 
-    if (!user.partnerId) {
+    let user = await this.userService.findByEmail(email);
+
+    if (paidFor === PaidFor.ONBOARDING) {
+      if (user && user.role.name !== RoleName.STUDENT) {
+        throw new ConflictException(
+          'Payment email is already registered to a non-student account',
+        );
+      }
+
+      if (
+        input.source === 'api' &&
+        input.requestingStudentEmail &&
+        user &&
+        user.email.toLowerCase() !== input.requestingStudentEmail.toLowerCase()
+      ) {
+        throw new ForbiddenException(
+          'Payment does not belong to the authenticated student',
+        );
+      }
+
+      return this.fulfillOnboarding(
+        user,
+        flutterwaveData,
+        metadata,
+        email,
+        input.source,
+        existing,
+        input.registrationFallback,
+      );
+    }
+
+    if (!user || user.role.name !== RoleName.STUDENT) {
+      throw new NotFoundException('Student account not found for payment email');
+    }
+
+    if (
+      input.source === 'api' &&
+      input.requestingStudentEmail &&
+      user.email.toLowerCase() !== input.requestingStudentEmail.toLowerCase()
+    ) {
+      throw new ForbiddenException(
+        'Payment does not belong to the authenticated student',
+      );
+    }
+
+    return this.fulfillCourse(
+      user,
+      flutterwaveData,
+      metadata,
+      input.source,
+      existing,
+    );
+  }
+
+  private async fulfillOnboarding(
+    user: User | null,
+    flutterwaveData: FlutterwaveVerifyData,
+    metadata: PaymentMetadata,
+    email: string,
+    source: 'api' | 'webhook' | 'sync',
+    existing: PaymentTransaction | null,
+    registrationFallback?: Partial<OnboardingRegistrationInput>,
+  ) {
+    const studentAlreadyRegistered = Boolean(user);
+
+    if (user && !user.partnerId) {
       throw new BadRequestException('Student is not linked to a partner');
     }
 
-    const partner = await this.partnersService.findOneEntity(user.partnerId);
+    const registrationInput = user
+      ? null
+      : this.resolveOnboardingRegistrationInput(
+          metadata,
+          flutterwaveData,
+          email,
+          registrationFallback,
+        );
+
+    const partnerId = user?.partnerId ?? registrationInput!.partnerId;
+    const partner = await this.partnersService.findOneEntity(partnerId);
     const expectedAmount = await this.settingsService.resolveOnboardingFeeForPartner(
       partner.onboardingFee,
     );
@@ -178,12 +409,37 @@ export class PaymentFulfillmentService {
     const partnerCut = calculatePartnerCut(paidAmount, partner);
     const platformCut = roundMoney(paidAmount - partnerCut);
 
-    return this.dataSource.transaction(async (manager) => {
+    let pendingReceipt:
+      | { student: User; transaction: PaymentTransaction }
+      | undefined;
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      let student = user;
+
+      if (!student) {
+        try {
+          student = await this.studentsService.createStudentFromOnboardingPayment(
+            manager,
+            registrationInput!,
+          );
+        } catch (error) {
+          if (error instanceof ConflictException) {
+            const existingStudent = await this.userService.findByEmail(email);
+            if (!existingStudent || existingStudent.role.name !== RoleName.STUDENT) {
+              throw error;
+            }
+            student = existingStudent;
+          } else {
+            throw error;
+          }
+        }
+      }
+
       const transaction = await this.saveTransaction(manager, {
         existing,
         flutterwaveData,
         paidFor: PaidFor.ONBOARDING,
-        user,
+        user: student,
         partner,
         courseId: null,
         partnerCut,
@@ -193,33 +449,126 @@ export class PaymentFulfillmentService {
       });
 
       if (transaction.fulfillmentCompleted) {
-        return this.serializeTransaction(transaction);
+        return {
+          ...this.serializeTransaction(transaction),
+          alreadyFulfilled: true,
+          studentAlreadyRegistered,
+          studentCreated: !studentAlreadyRegistered,
+        };
       }
 
-      user.onboardingStatus = OnboardingStatus.ONBOARDED;
-      await manager.save(user);
+      if (student.onboardingStatus !== OnboardingStatus.ONBOARDED) {
+        student.onboardingStatus = OnboardingStatus.ONBOARDED;
+        await manager.save(student);
+      }
 
       transaction.fulfillmentCompleted = true;
       await manager.save(transaction);
 
-      await this.sendOnboardingReceipt(user, transaction);
+      if (source !== 'sync') {
+        pendingReceipt = { student, transaction };
+      }
 
-      return this.serializeTransaction(transaction);
+      return {
+        ...this.serializeTransaction(transaction),
+        alreadyFulfilled: false,
+        studentAlreadyRegistered,
+        studentCreated: !studentAlreadyRegistered,
+      };
     });
+
+    if (pendingReceipt) {
+      await this.sendOnboardingReceipt(
+        pendingReceipt.student,
+        pendingReceipt.transaction,
+      );
+    }
+
+    return result;
+  }
+
+  private resolveOnboardingRegistrationInput(
+    metadata: PaymentMetadata,
+    flutterwaveData: FlutterwaveVerifyData,
+    email: string,
+    registrationFallback?: Partial<OnboardingRegistrationInput>,
+  ): OnboardingRegistrationInput {
+    const partnerId = metadata.partnerId ?? registrationFallback?.partnerId;
+    const accessCode = metadata.accessCode ?? registrationFallback?.accessCode;
+    const fullName =
+      metadata.fullName ??
+      registrationFallback?.fullName ??
+      flutterwaveData.customer?.name;
+    const phone =
+      metadata.phone ??
+      registrationFallback?.phone ??
+      flutterwaveData.customer?.phone_number;
+
+    if (!partnerId) {
+      throw new BadRequestException(
+        'Payment metadata must include partnerId for onboarding registration',
+      );
+    }
+
+    if (!accessCode) {
+      throw new BadRequestException(
+        'Payment metadata must include accessCode for onboarding registration',
+      );
+    }
+
+    if (!fullName?.trim()) {
+      throw new BadRequestException(
+        'Payment metadata must include fullName for onboarding registration',
+      );
+    }
+
+    if (!phone?.trim()) {
+      throw new BadRequestException(
+        'Payment metadata must include phone for onboarding registration',
+      );
+    }
+
+    return {
+      email,
+      partnerId,
+      accessCode,
+      fullName: fullName.trim(),
+      phone: phone.trim(),
+    };
+  }
+
+  private buildRegistrationFallback(
+    meta: PaymentMetadata,
+    customer: {
+      email?: string;
+      name?: string;
+      phone_number?: string;
+    },
+  ): Partial<OnboardingRegistrationInput> | undefined {
+    const fallback = {
+      email: meta.email ?? customer.email,
+      partnerId: meta.partnerId,
+      accessCode: meta.accessCode,
+      fullName: meta.fullName ?? customer.name,
+      phone: meta.phone ?? customer.phone_number,
+    };
+
+    const hasAny = Object.values(fallback).some((value) => Boolean(value));
+    return hasAny ? fallback : undefined;
   }
 
   private async fulfillCourse(
     user: User,
     flutterwaveData: FlutterwaveVerifyData,
-    metadata: Record<string, unknown>,
-    source: 'api' | 'webhook',
+    metadata: PaymentMetadata,
+    source: 'api' | 'webhook' | 'sync',
     existing: PaymentTransaction | null,
   ) {
     if (user.onboardingStatus !== OnboardingStatus.ONBOARDED) {
       throw new BadRequestException('Student must complete onboarding before purchasing courses');
     }
 
-    const courseId = metadata.courseId as string | undefined;
+    const courseId = metadata.courseId;
 
     if (!courseId) {
       throw new BadRequestException('Payment metadata must include courseId for course payments');
@@ -248,7 +597,11 @@ export class PaymentFulfillmentService {
       ? await this.partnersService.findOneEntity(course.partnerId)
       : null;
 
-    return this.dataSource.transaction(async (manager) => {
+    let pendingDelivery:
+      | { user: User; courseId: string; courseTitle: string }
+      | undefined;
+
+    const result = await this.dataSource.transaction(async (manager) => {
       const transaction = await this.saveTransaction(manager, {
         existing,
         flutterwaveData,
@@ -286,8 +639,12 @@ export class PaymentFulfillmentService {
       transaction.fulfillmentCompleted = true;
       await manager.save(transaction);
 
-      if (!existingEnrollment?.unlockedAt) {
-        await this.deliverCourseAccess(user, course.id, course.title);
+      if (source !== 'sync' && !existingEnrollment?.unlockedAt) {
+        pendingDelivery = {
+          user,
+          courseId: course.id,
+          courseTitle: course.title,
+        };
       }
 
       return {
@@ -295,6 +652,16 @@ export class PaymentFulfillmentService {
         enrollmentId: enrollment.id,
       };
     });
+
+    if (pendingDelivery) {
+      await this.deliverCourseAccess(
+        pendingDelivery.user,
+        pendingDelivery.courseId,
+        pendingDelivery.courseTitle,
+      );
+    }
+
+    return result;
   }
 
   private async saveTransaction(
@@ -308,8 +675,8 @@ export class PaymentFulfillmentService {
       courseId: string | null;
       partnerCut: number;
       platformCut: number;
-      metadata: Record<string, unknown>;
-      source: 'api' | 'webhook';
+      metadata: PaymentMetadata;
+      source: 'api' | 'webhook' | 'sync';
     },
   ): Promise<PaymentTransaction> {
     const fees = roundMoney(
@@ -322,7 +689,7 @@ export class PaymentFulfillmentService {
       externalTransactionId: String(input.flutterwaveData.id),
     });
 
-    payload.txRef = input.flutterwaveData.tx_ref ?? null;
+    payload.txRef = input.flutterwaveData.tx_ref || null;
     payload.flwRef = input.flutterwaveData.flw_ref ?? null;
     payload.paidFor = input.paidFor;
     payload.userId = input.user.id;
@@ -349,15 +716,43 @@ export class PaymentFulfillmentService {
     return manager.save(payload);
   }
 
+  private async findExistingTransaction(
+    flutterwaveData: FlutterwaveVerifyData,
+  ): Promise<PaymentTransaction | null> {
+    const byExternal = await this.transactionsRepository.findOne({
+      where: {
+        paymentPlatform: PaymentPlatform.FLUTTERWAVE,
+        externalTransactionId: String(flutterwaveData.id),
+      },
+      relations: ['user', 'course'],
+    });
+
+    if (byExternal) {
+      return byExternal;
+    }
+
+    if (flutterwaveData.tx_ref) {
+      return this.transactionsRepository.findOne({
+        where: {
+          paymentPlatform: PaymentPlatform.FLUTTERWAVE,
+          txRef: flutterwaveData.tx_ref,
+        },
+        relations: ['user', 'course'],
+      });
+    }
+
+    return null;
+  }
+
   private async resolveFlutterwaveData(
     input: VerifyPaymentInput,
   ): Promise<FlutterwaveVerifyData> {
-    if (input.transactionId) {
-      return this.flutterwaveService.verifyByTransactionId(input.transactionId);
-    }
-
     if (input.txRef) {
       return this.flutterwaveService.verifyByReference(input.txRef);
+    }
+
+    if (input.transactionId) {
+      return this.flutterwaveService.verifyByTransactionId(input.transactionId);
     }
 
     throw new BadRequestException('transactionId or txRef is required');

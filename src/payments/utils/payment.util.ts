@@ -25,7 +25,10 @@ export function parsePaymentMetadata(
   return meta as PaymentMetadata;
 }
 
-export function normalizePaidFor(value?: string): PaidFor {
+export function normalizePaidFor(
+  value?: string,
+  fallback?: PaidFor,
+): PaidFor {
   const normalized = value?.toLowerCase();
 
   if (normalized === PaidFor.COURSE) {
@@ -36,7 +39,24 @@ export function normalizePaidFor(value?: string): PaidFor {
     return PaidFor.ONBOARDING;
   }
 
+  if (fallback) {
+    return fallback;
+  }
+
   throw new BadRequestException('Invalid payment metadata: paidFor is required');
+}
+
+export function mergePaymentMetadata(
+  ...sources: Array<PaymentMetadata | Record<string, unknown> | undefined>
+): PaymentMetadata {
+  const merged: PaymentMetadata = {};
+
+  for (const source of sources) {
+    const parsed = parsePaymentMetadata(source);
+    Object.assign(merged, parsed);
+  }
+
+  return merged;
 }
 
 export function isOnboardingEligible(status: OnboardingStatus | null): boolean {

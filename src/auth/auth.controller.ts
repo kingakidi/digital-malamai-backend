@@ -16,10 +16,14 @@ import {
   AuthTokenResponseDto,
   MessageResponseDto,
   OtpSentResponseDto,
+  PaymentEligibilityResponseDto,
+  PaymentVerifyResponseDto,
+  StudentRegistrationValidatedResponseDto,
   UserProfileResponseDto,
   UserResponseDto,
 } from '../common/swagger';
 import { CurrentUser } from '../common/abac/decorators/current-user.decorator';
+import { SkipMustChangePasswordCheck } from '../common/abac/decorators/skip-must-change-password.decorator';
 import { RequireRole } from '../common/abac/decorators/require-role.decorator';
 import { JwtAuthGuard } from '../common/abac/guards/jwt-auth.guard';
 import { RoleGuard } from '../common/abac/guards/role.guard';
@@ -33,9 +37,12 @@ import { VerifyOtpDto } from '../otps/dto/verify-otp.dto';
 import { OtpsService } from '../otps/otps.service';
 import { UserService } from '../user/user.service';
 import { AuthService } from './auth.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { RegisterStudentDto } from './dto/register-student.dto';
 import { SignInDto } from './dto/sign-in.dto';
 import { StudentSignInDto } from './dto/student-sign-in.dto';
+import { VerifyOnboardingPaymentDto } from '../payments/dto/verify-onboarding-payment.dto';
+import { CheckPaymentEligibilityDto } from '../payments/dto/check-payment-eligibility.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -60,12 +67,33 @@ export class AuthController {
     return this.authService.login(signInDto);
   }
 
+  @Post('student/check-payment-eligibility')
+  @ApiOkData(PaymentEligibilityResponseDto)
+  @ResponseMessage('Payment eligibility checked successfully')
+  checkPaymentEligibility(@Body() dto: CheckPaymentEligibilityDto) {
+    return this.authService.checkPaymentEligibility(dto);
+  }
+
   @Post('student/register')
   @HttpCode(HttpStatus.CREATED)
-  @ApiCreatedData(UserResponseDto)
-  @ResponseMessage('Student registered successfully')
+  @ApiCreatedData(StudentRegistrationValidatedResponseDto)
+  @ResponseMessage('Student registration validated successfully')
   registerStudent(@Body() dto: RegisterStudentDto) {
     return this.authService.registerStudent(dto);
+  }
+
+  @Post('student/verify-onboarding-payment')
+  @ApiCreatedData(PaymentVerifyResponseDto)
+  @ResponseMessage('Onboarding payment verified successfully')
+  verifyOnboardingPayment(@Body() dto: VerifyOnboardingPaymentDto) {
+    return this.authService.verifyOnboardingPayment(dto);
+  }
+
+  @Post('student/requery-onboarding-payment')
+  @ApiCreatedData(PaymentVerifyResponseDto)
+  @ResponseMessage('Onboarding payment requeried successfully')
+  requeryOnboardingPayment(@Body() dto: VerifyOnboardingPaymentDto) {
+    return this.authService.requeryOnboardingPayment(dto);
   }
 
   @Post('student/login')
@@ -116,6 +144,20 @@ export class AuthController {
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
+  @SkipMustChangePasswordCheck()
+  @Patch('change-password')
+  @ApiOkData(MessageResponseDto)
+  @ResponseMessage('Password changed successfully')
+  changePassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(user.id, dto);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @SkipMustChangePasswordCheck()
   @Get('profile')
   @ApiOkData(UserProfileResponseDto)
   @ResponseMessage('Profile retrieved successfully')

@@ -1,4 +1,4 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/abac/decorators/current-user.decorator';
 import { RequireRole } from '../common/abac/decorators/require-role.decorator';
@@ -45,7 +45,10 @@ export class CoursesController {
   @Get(':id')
   @ApiOkData(CourseWithEnrollmentResponseDto)
   @ResponseMessage('Course retrieved successfully')
-  findById(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+  findById(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     return this.coursesService.findPublishedCourseForStudent(
       id,
       user.id,

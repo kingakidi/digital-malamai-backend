@@ -4,7 +4,9 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  NotFoundException,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
@@ -13,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/abac/decorators/current-user.decorator';
+import { SkipMustChangePasswordCheck } from '../common/abac/decorators/skip-must-change-password.decorator';
 import { RequirePermission } from '../common/abac/decorators/require-permission.decorator';
 import { RequireRole } from '../common/abac/decorators/require-role.decorator';
 import { JwtAuthGuard } from '../common/abac/guards/jwt-auth.guard';
@@ -27,6 +30,7 @@ import {
   RoleName,
 } from '../common/types/permission.types';
 import { CreatePartnerWithUserDto } from './dto/create-partner-with-user.dto';
+import { ChangePartnerPasswordDto } from './dto/change-partner-password.dto';
 import { CreatePartnerDto } from './dto/create-partner.dto';
 import { UpdatePartnerFeesDto } from './dto/update-partner-fees.dto';
 import { UpdatePartnerDto } from './dto/update-partner.dto';
@@ -36,8 +40,10 @@ import {
   ApiOkPaginated,
   CourseResponseDto,
   CreatePartnerWithUserResponseDto,
+  MessageResponseDto,
   PartnerResponseDto,
   PartnerRevenueResponseDto,
+  PublicPartnerResponseDto,
   UserResponseDto,
 } from '../common/swagger';
 import { CoursesService } from '../courses/courses.service';
@@ -50,7 +56,7 @@ export class PartnersController {
   constructor(private readonly partnersService: PartnersService) {}
 
   @Get()
-  @ApiOkPaginated(PartnerResponseDto)
+  @ApiOkPaginated(PublicPartnerResponseDto)
   @ResponseMessage('Partners retrieved successfully')
   findAllActive(@Query() query: PaginationQueryDto) {
     return this.partnersService.findAllActive(query);
@@ -67,14 +73,18 @@ export class PartnersController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() updatePartnerDto: UpdatePartnerDto,
   ) {
-    return this.partnersService.update(user.partnerId!, updatePartnerDto);
+    if (!user.partnerId) {
+      throw new NotFoundException('Partner profile is not linked to this account');
+    }
+
+    return this.partnersService.update(user.partnerId, updatePartnerDto);
   }
 
   @Get(':id')
-  @ApiOkData(PartnerResponseDto)
+  @ApiOkData(PublicPartnerResponseDto)
   @ResponseMessage('Partner retrieved successfully')
-  findOne(@Param('id') id: string) {
-    return this.partnersService.findOne(id);
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.partnersService.findOnePublic(id);
   }
 }
 
@@ -89,6 +99,18 @@ export class PartnerPortalController {
     private readonly coursesService: CoursesService,
     private readonly studentsService: StudentsService,
   ) {}
+
+  @Patch('profile/me/password')
+  @SkipMustChangePasswordCheck()
+  @ApiOkData(MessageResponseDto)
+  @RequirePermission(PermissionResource.PARTNERS, PermissionAction.UPDATE)
+  @ResponseMessage('Password changed successfully')
+  changeOwnPassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ChangePartnerPasswordDto,
+  ) {
+    return this.partnersService.changeOwnPassword(user.id, dto);
+  }
 
   @Get('courses')
   @ApiOkPaginated(CourseResponseDto)
@@ -126,7 +148,10 @@ export class PartnerPortalController {
 @UseGuards(JwtAuthGuard, PermissionGuard, RoleGuard)
 @Controller('admin/partners')
 export class AdminPartnersController {
-  constructor(private readonly partnersService: PartnersService) {}
+  constructor(
+    private readonly partnersService: PartnersService,
+    private readonly studentsService: StudentsService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -154,11 +179,23 @@ export class AdminPartnersController {
     return this.partnersService.findAll(query);
   }
 
+  @Get(':id/students')
+  @ApiOkPaginated(UserResponseDto)
+  @RequirePermission(PermissionResource.PARTNERS, PermissionAction.READ)
+  @ResponseMessage('Partner students retrieved successfully')
+  async findStudents(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: PaginationQueryDto,
+  ) {
+    await this.partnersService.findOneEntity(id);
+    return this.studentsService.findStudentsForPartner(id, query);
+  }
+
   @Get(':id')
   @ApiOkData(PartnerResponseDto)
   @RequirePermission(PermissionResource.PARTNERS, PermissionAction.READ)
   @ResponseMessage('Partner retrieved successfully')
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.partnersService.findOne(id);
   }
 
@@ -166,7 +203,7 @@ export class AdminPartnersController {
   @ApiOkData(PartnerResponseDto)
   @RequirePermission(PermissionResource.PARTNERS, PermissionAction.UPDATE)
   @ResponseMessage('Partner updated successfully')
-  update(@Param('id') id: string, @Body() dto: UpdatePartnerDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdatePartnerDto) {
     return this.partnersService.update(id, dto);
   }
 
@@ -175,7 +212,10 @@ export class AdminPartnersController {
   @RequireRole(RoleName.SUPERADMIN)
   @RequirePermission(PermissionResource.PARTNERS, PermissionAction.UPDATE)
   @ResponseMessage('Partner fees updated successfully')
-  updateFees(@Param('id') id: string, @Body() dto: UpdatePartnerFeesDto) {
+  updateFees(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdatePartnerFeesDto,
+  ) {
     return this.partnersService.updateFees(id, dto);
   }
 
@@ -183,7 +223,16 @@ export class AdminPartnersController {
   @ApiOkData(PartnerResponseDto)
   @RequirePermission(PermissionResource.PARTNERS, PermissionAction.UPDATE)
   @ResponseMessage('Partner disabled successfully')
-  disable(@Param('id') id: string) {
+  disable(@Param('id', ParseUUIDPipe) id: string) {
     return this.partnersService.disable(id);
+  }
+
+  @Post(':id/resend-welcome-email')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOkData(MessageResponseDto)
+  @RequirePermission(PermissionResource.PARTNERS, PermissionAction.UPDATE)
+  @ResponseMessage('Welcome email has been queued')
+  resendWelcomeEmail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.partnersService.resendWelcomeEmail(id);
   }
 }

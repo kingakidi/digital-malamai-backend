@@ -4,6 +4,7 @@ import {
   Entity,
   OneToMany,
   PrimaryGeneratedColumn,
+  Unique,
   UpdateDateColumn,
 } from 'typeorm';
 import { CommissionType } from '../../common/types/payment.types';
@@ -11,6 +12,7 @@ import { PartnerStatus } from '../../common/types/partner-status.type';
 import { User } from '../../user/entities/user.entity';
 
 @Entity('partners')
+@Unique(['email'])
 export class Partner {
   @PrimaryGeneratedColumn('uuid')
   id: string;

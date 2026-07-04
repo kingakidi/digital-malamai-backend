@@ -5,8 +5,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AccessCodesModule } from './access-codes/access-codes.module';
 import { AbacModule } from './common/abac/abac.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { RequestDebugInterceptor } from './common/interceptors/request-debug.interceptor';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import appConfig from './config/app.config';
+import superadminConfig from './config/superadmin.config';
 import databaseConfig from './config/database.config';
 import { validateEnvironment } from './config/env.validation';
 import flutterwaveConfig from './config/flutterwave.config';
@@ -37,6 +39,7 @@ import { WelcomeModule } from './welcome/welcome.module';
         databaseConfig,
         jwtConfig,
         appConfig,
+        superadminConfig,
         smtpConfig,
         otpConfig,
         messagingConfig,
@@ -75,6 +78,7 @@ import { WelcomeModule } from './welcome/welcome.module';
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: RequestDebugInterceptor },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
   ],
 })

@@ -5,7 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { RegisterStudentDto } from '../auth/dto/register-student.dto';
 import { StudentSignInDto } from '../auth/dto/student-sign-in.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
@@ -21,8 +21,10 @@ import {
 import { AccessCode } from '../access-codes/entities/access-code.entity';
 import { PartnersService } from '../partners/partners.service';
 import { RolesService } from '../roles/roles.service';
+import { SettingsService } from '../settings/settings.service';
 import { User } from '../user/entities/user.entity';
 import { UserService } from '../user/user.service';
+import { OnboardingRegistrationInput } from './types/onboarding-registration.type';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -32,6 +34,7 @@ export class StudentsService {
     private readonly userService: UserService,
     private readonly rolesService: RolesService,
     private readonly partnersService: PartnersService,
+    private readonly settingsService: SettingsService,
     @InjectRepository(AccessCode)
     private readonly accessCodesRepository: Repository<AccessCode>,
     @InjectRepository(User)
@@ -39,20 +42,41 @@ export class StudentsService {
   ) {}
 
   async register(dto: RegisterStudentDto) {
-    const partner = await this.partnersService.findOneEntity(dto.partnerId);
+    const partner = await this.assertRegistrationValid(dto);
+    const systemFee = await this.settingsService.getOnboardingFee();
+    const onboardingFee =
+      await this.settingsService.resolveOnboardingFeeForPartner(
+        partner.onboardingFee,
+      );
 
-    if (partner.status !== PartnerStatus.ACTIVE) {
-      throw new ConflictException('Partner is not active');
-    }
+    return {
+      validated: true,
+      email: dto.email.toLowerCase(),
+      partnerId: dto.partnerId,
+      onboardingFee,
+      currency: systemFee.currency,
+    };
+  }
 
-    const existingEmail = await this.userService.findByEmail(dto.email);
+  async createStudentFromOnboardingPayment(
+    manager: EntityManager,
+    input: OnboardingRegistrationInput,
+  ): Promise<User> {
+    const existingEmail = await this.userService.findByEmail(
+      input.email.toLowerCase(),
+    );
     if (existingEmail) {
-      throw new ConflictException('Email already exists');
+      throw new ConflictException('Student account already exists for this email');
     }
 
-    const existingPhone = await this.userService.findByPhone(dto.phone);
+    const existingPhone = await this.userService.findByPhone(input.phone);
     if (existingPhone) {
       throw new ConflictException('Phone number already exists');
+    }
+
+    const partner = await this.partnersService.findOneEntity(input.partnerId);
+    if (partner.status !== PartnerStatus.ACTIVE) {
+      throw new ConflictException('Partner is not active');
     }
 
     const studentRole = await this.rolesService.findByName(RoleName.STUDENT);
@@ -60,54 +84,49 @@ export class StudentsService {
       throw new NotFoundException('Student role is not configured');
     }
 
-    const normalizedCode = dto.accessCode.toUpperCase();
-    const { firstName, lastName } = this.splitFullName(dto.fullName);
+    const normalizedCode = input.accessCode.toUpperCase();
+    const { firstName, lastName } = this.splitFullName(input.fullName);
 
-    const user = await this.dataSource.transaction(async (manager) => {
-      const accessCode = await manager
-        .createQueryBuilder(AccessCode, 'accessCode')
-        .setLock('pessimistic_write')
-        .where('accessCode.code = :code', { code: normalizedCode })
-        .andWhere('accessCode.partnerId = :partnerId', {
-          partnerId: dto.partnerId,
-        })
-        .getOne();
+    const accessCode = await manager
+      .createQueryBuilder(AccessCode, 'accessCode')
+      .setLock('pessimistic_write')
+      .where('accessCode.code = :code', { code: normalizedCode })
+      .andWhere('accessCode.partnerId = :partnerId', {
+        partnerId: input.partnerId,
+      })
+      .getOne();
 
-      if (!accessCode) {
-        throw new ConflictException('Invalid access code for this partner');
-      }
+    if (!accessCode) {
+      throw new ConflictException('Invalid access code for this partner');
+    }
 
-      if (accessCode.isUsed) {
-        throw new ConflictException('Access code has already been used');
-      }
+    if (accessCode.isUsed) {
+      throw new ConflictException('Access code has already been used');
+    }
 
-      if (accessCode.expiresAt && accessCode.expiresAt < new Date()) {
-        throw new ConflictException('Access code has expired');
-      }
+    if (accessCode.expiresAt && accessCode.expiresAt < new Date()) {
+      throw new ConflictException('Access code has expired');
+    }
 
-      const student = manager.create(User, {
-        firstName,
-        lastName,
-        email: dto.email.toLowerCase(),
-        phone: dto.phone,
-        password: null,
-        role: studentRole,
-        partnerId: dto.partnerId,
-        accessCodeId: accessCode.id,
-        onboardingStatus: OnboardingStatus.PENDING,
-      });
-
-      const savedStudent = await manager.save(student);
-
-      accessCode.isUsed = true;
-      accessCode.studentId = savedStudent.id;
-      await manager.save(accessCode);
-
-      return savedStudent;
+    const student = manager.create(User, {
+      firstName,
+      lastName,
+      email: input.email.toLowerCase(),
+      phone: input.phone,
+      password: null,
+      role: studentRole,
+      partnerId: input.partnerId,
+      accessCodeId: accessCode.id,
+      onboardingStatus: OnboardingStatus.PENDING,
     });
 
-    const profile = await this.userService.findByIdWithRole(user.id);
-    return this.userService.sanitizeUser(profile!);
+    const savedStudent = await manager.save(student);
+
+    accessCode.isUsed = true;
+    accessCode.studentId = savedStudent.id;
+    await manager.save(accessCode);
+
+    return savedStudent;
   }
 
   async login(dto: StudentSignInDto) {
@@ -195,6 +214,45 @@ export class StudentsService {
       total,
       query,
     );
+  }
+
+  private async assertRegistrationValid(dto: RegisterStudentDto) {
+    const partner = await this.partnersService.findOneEntity(dto.partnerId);
+
+    if (partner.status !== PartnerStatus.ACTIVE) {
+      throw new ConflictException('Partner is not active');
+    }
+
+    const existingEmail = await this.userService.findByEmail(
+      dto.email.toLowerCase(),
+    );
+    if (existingEmail) {
+      throw new ConflictException('Email already exists');
+    }
+
+    const existingPhone = await this.userService.findByPhone(dto.phone);
+    if (existingPhone) {
+      throw new ConflictException('Phone number already exists');
+    }
+
+    const normalizedCode = dto.accessCode.toUpperCase();
+    const accessCode = await this.accessCodesRepository.findOne({
+      where: { code: normalizedCode, partnerId: dto.partnerId },
+    });
+
+    if (!accessCode) {
+      throw new ConflictException('Invalid access code for this partner');
+    }
+
+    if (accessCode.isUsed) {
+      throw new ConflictException('Access code has already been used');
+    }
+
+    if (accessCode.expiresAt && accessCode.expiresAt < new Date()) {
+      throw new ConflictException('Access code has expired');
+    }
+
+    return partner;
   }
 
   private async validateStudentCredential(

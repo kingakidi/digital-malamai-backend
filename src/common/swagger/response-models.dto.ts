@@ -109,6 +109,12 @@ export class UserResponseDto {
   @ApiProperty()
   isActive: boolean;
 
+  @ApiProperty({
+    description:
+      'When true, partner must change password before using protected routes',
+  })
+  mustChangePassword: boolean;
+
   @ApiProperty({ type: RoleBasicDto })
   role: RoleBasicDto;
 
@@ -136,6 +142,44 @@ export class AuthTokenResponseDto {
 
   @ApiProperty({ type: UserProfileResponseDto })
   user: UserProfileResponseDto;
+}
+
+export class PublicPartnerResponseDto {
+  @ApiProperty({ format: 'uuid' })
+  id: string;
+
+  @ApiProperty()
+  firstName: string;
+
+  @ApiProperty()
+  lastName: string;
+
+  @ApiProperty()
+  email: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  phoneNumber: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  address: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  description: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  logoUrl: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  onboardingFee: number | null;
+
+  @ApiProperty({ enum: PartnerStatus })
+  status: PartnerStatus;
+
+  @ApiProperty()
+  createdAt: Date;
+
+  @ApiProperty()
+  updatedAt: Date;
 }
 
 export class PartnerResponseDto {
@@ -239,6 +283,33 @@ export class AccessCodeStatsResponseDto {
 
   @ApiProperty()
   expired: number;
+}
+
+export class GenerateAccessCodesResultDto {
+  @ApiProperty({ format: 'uuid' })
+  partnerId: string;
+
+  @ApiProperty()
+  requested: number;
+
+  @ApiProperty()
+  generated: number;
+
+  @ApiPropertyOptional({
+    type: [AccessCodeResponseDto],
+    description: 'Included only when generated count is 50 or fewer',
+  })
+  codes?: AccessCodeResponseDto[];
+}
+
+export class DeleteAccessCodesResultDto {
+  @ApiProperty()
+  deleted: number;
+
+  @ApiProperty({
+    description: 'Codes skipped because they are used or linked to a student',
+  })
+  skipped: number;
 }
 
 export class CourseEnrollmentSummaryDto {
@@ -465,6 +536,95 @@ export class PaymentTransactionResponseDto {
 export class PaymentVerifyResponseDto extends PaymentTransactionResponseDto {
   @ApiPropertyOptional({ format: 'uuid', nullable: true })
   enrollmentId?: string | null;
+}
+
+export class StudentRegistrationValidatedResponseDto {
+  @ApiProperty({ example: true })
+  validated: boolean;
+
+  @ApiProperty()
+  email: string;
+
+  @ApiProperty({ format: 'uuid' })
+  partnerId: string;
+
+  @ApiProperty({ example: 5000 })
+  onboardingFee: number;
+
+  @ApiProperty({ example: 'NGN' })
+  currency: string;
+}
+
+export class PaymentEligibilityResponseDto {
+  @ApiProperty()
+  eligible: boolean;
+
+  @ApiProperty()
+  alreadyPaid: boolean;
+
+  @ApiProperty({ enum: PaidFor })
+  paidFor: PaidFor;
+
+  @ApiProperty()
+  email: string;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  partnerId: string | null;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  courseId: string | null;
+
+  @ApiPropertyOptional({ enum: ['database', 'flutterwave'], nullable: true })
+  source: 'database' | 'flutterwave' | null;
+
+  @ApiProperty()
+  message: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  matchedTransactionId: string | null;
+}
+
+export class PaymentSyncItemResponseDto {
+  @ApiProperty()
+  externalTransactionId: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  txRef: string | null;
+
+  @ApiPropertyOptional({ enum: PaidFor, nullable: true })
+  paidFor: PaidFor | null;
+
+  @ApiProperty({ enum: ['synced', 'skipped', 'failed'] })
+  status: 'synced' | 'skipped' | 'failed';
+
+  @ApiPropertyOptional()
+  reason?: string;
+}
+
+export class PaymentSyncSummaryResponseDto {
+  @ApiProperty({ example: 3 })
+  days: number;
+
+  @ApiProperty({ example: '2026-07-01' })
+  from: string;
+
+  @ApiProperty({ example: '2026-07-08' })
+  to: string;
+
+  @ApiProperty()
+  totalFetched: number;
+
+  @ApiProperty()
+  synced: number;
+
+  @ApiProperty()
+  skipped: number;
+
+  @ApiProperty()
+  failed: number;
+
+  @ApiProperty({ type: [PaymentSyncItemResponseDto] })
+  items: PaymentSyncItemResponseDto[];
 }
 
 export class OnboardingStatusResponseDto {

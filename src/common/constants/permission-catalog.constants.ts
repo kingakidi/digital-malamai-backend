@@ -190,6 +190,13 @@ export const PERMISSION_GROUPS: PermissionGroupDefinition[] = [
         'View partner access codes',
         'Partner views access codes for their organization',
       ),
+      perm(
+        PermissionResource.ACCESS_CODES,
+        PermissionAction.DELETE,
+        PermissionScope.ALL,
+        'Delete unused access codes',
+        'Remove unused access codes for any partner',
+      ),
     ],
   },
   {

@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
@@ -47,7 +48,7 @@ export class AdminCoursesController {
   @Get(':id')
   @ApiOkData(CourseResponseDto)
   @ResponseMessage('Course retrieved successfully')
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.coursesService.findCourseById(id);
   }
 
@@ -62,21 +63,21 @@ export class AdminCoursesController {
   @Put(':id')
   @ApiOkData(CourseResponseDto)
   @ResponseMessage('Course updated successfully')
-  update(@Param('id') id: string, @Body() dto: UpdateCourseDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCourseDto) {
     return this.coursesService.updateCourse(id, dto);
   }
 
   @Patch(':id/publish')
   @ApiOkData(CourseResponseDto)
   @ResponseMessage('Course publish status updated successfully')
-  publish(@Param('id') id: string, @Body() dto: PublishCourseDto) {
+  publish(@Param('id', ParseUUIDPipe) id: string, @Body() dto: PublishCourseDto) {
     return this.coursesService.publishCourse(id, dto);
   }
 
   @Patch(':id/disable')
   @ApiOkData(CourseResponseDto)
   @ResponseMessage('Course disabled successfully')
-  disable(@Param('id') id: string) {
+  disable(@Param('id', ParseUUIDPipe) id: string) {
     return this.coursesService.disableCourse(id);
   }
 }
@@ -100,21 +101,21 @@ export class StaffCoursesController {
   @Put(':id')
   @ApiOkData(CourseResponseDto)
   @ResponseMessage('Course updated successfully')
-  update(@Param('id') id: string, @Body() dto: UpdateCourseDto) {
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCourseDto) {
     return this.coursesService.updateCourse(id, dto);
   }
 
   @Patch(':id/publish')
   @ApiOkData(CourseResponseDto)
   @ResponseMessage('Course publish status updated successfully')
-  publish(@Param('id') id: string, @Body() dto: PublishCourseDto) {
+  publish(@Param('id', ParseUUIDPipe) id: string, @Body() dto: PublishCourseDto) {
     return this.coursesService.publishCourse(id, dto);
   }
 
   @Patch(':id/disable')
   @ApiOkData(CourseResponseDto)
   @ResponseMessage('Course disabled successfully')
-  disable(@Param('id') id: string) {
+  disable(@Param('id', ParseUUIDPipe) id: string) {
     return this.coursesService.disableCourse(id);
   }
 }

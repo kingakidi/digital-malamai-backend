@@ -57,11 +57,18 @@ export class MailService {
       return null;
     }
 
+    const port = this.configService.get<number>('smtp.port') ?? 587;
+    const secure = this.configService.get<boolean>('smtp.secure') ?? port === 465;
+
     this.transporter = nodemailer.createTransport({
       host,
-      port: this.configService.get<number>('smtp.port'),
-      secure: this.configService.get<boolean>('smtp.secure'),
+      port,
+      secure,
+      requireTLS: this.configService.get<boolean>('smtp.requireTls') ?? false,
       auth: { user, pass },
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 15_000,
     });
 
     return this.transporter;

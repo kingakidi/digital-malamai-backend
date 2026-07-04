@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Headers,
@@ -8,7 +7,6 @@ import {
   Post,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { FlutterwaveWebhookPayload } from '../common/types/payment.types';
 import { ResponseMessage } from '../common/decorators/response-message.decorator';
 import { ApiOkData, PaymentVerifyResponseDto } from '../common/swagger';
 import { FlutterwaveService } from './flutterwave.service';
@@ -27,20 +25,15 @@ export class WebhooksController {
   @ApiOkData(PaymentVerifyResponseDto)
   @ResponseMessage('Webhook processed successfully')
   handleFlutterwaveWebhook(
-    @Headers('verif-hash') signature: string | undefined,
-    @Body() payload: FlutterwaveWebhookPayload,
+    @Headers('flutterwave-signature') flutterwaveSignature: string | undefined,
+    @Headers('verif-hash') legacySignature: string | undefined,
+    @Body() payload: Record<string, unknown>,
   ) {
-    this.flutterwaveService.verifyWebhookSignature(signature);
+    this.flutterwaveService.verifyWebhookSignature(
+      flutterwaveSignature,
+      legacySignature,
+    );
 
-    const transactionId = payload?.data?.id;
-
-    if (!transactionId) {
-      throw new BadRequestException('Webhook payload is missing transaction id');
-    }
-
-    return this.paymentFulfillmentService.verifyAndFulfill({
-      transactionId: String(transactionId),
-      source: 'webhook',
-    });
+    return this.paymentFulfillmentService.handleWebhookPayload(payload);
   }
 }

@@ -13,6 +13,15 @@ async function bootstrap() {
   const apiPrefix = configService.get<string>('app.apiPrefix')!;
   const swaggerPath = configService.get<string>('app.swaggerPath')!;
   const port = configService.get<number>('app.port')!;
+  const corsOrigins = configService.get<string[]>('app.corsOrigins') ?? [];
+
+  if (corsOrigins.length > 0) {
+    app.enableCors({
+      origin: corsOrigins,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+    });
+  }
 
   app.setGlobalPrefix(apiPrefix);
 

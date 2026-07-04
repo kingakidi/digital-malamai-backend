@@ -1,14 +1,18 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
 import { UserService } from '../../../user/user.service';
+import { SKIP_MUST_CHANGE_PASSWORD_KEY } from '../decorators/skip-must-change-password.decorator';
 import { AuthenticatedUser } from '../../interfaces/authenticated-user.interface';
+import { RoleName } from '../../types/permission.types';
 
 interface JwtPayload {
   sub: string;
@@ -21,6 +25,7 @@ export class JwtAuthGuard implements CanActivate {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly userService: UserService,
+    private readonly reflector: Reflector,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -50,6 +55,7 @@ export class JwtAuthGuard implements CanActivate {
         firstName: user.firstName,
         lastName: user.lastName,
         partnerId: user.partnerId,
+        mustChangePassword: user.mustChangePassword,
         role: {
           id: user.role.id,
           name: user.role.name,
@@ -59,8 +65,31 @@ export class JwtAuthGuard implements CanActivate {
       };
 
       request['user'] = authenticatedUser;
+
+      const skipPasswordChange = this.reflector.getAllAndOverride<boolean>(
+        SKIP_MUST_CHANGE_PASSWORD_KEY,
+        [context.getHandler(), context.getClass()],
+      );
+
+      if (
+        !skipPasswordChange &&
+        user.mustChangePassword &&
+        user.role.name !== RoleName.STUDENT
+      ) {
+        throw new ForbiddenException(
+          'You must change your password before continuing',
+        );
+      }
+
       return true;
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof ForbiddenException ||
+        error instanceof UnauthorizedException
+      ) {
+        throw error;
+      }
+
       throw new UnauthorizedException('Invalid or expired token');
     }
   }

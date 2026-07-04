@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Post,
   Put,
   UseGuards,
@@ -41,7 +42,7 @@ export class CourseVideosController {
   @RequireRole(RoleName.STUDENT, ...STAFF_COURSE_ROLES)
   @ResponseMessage('Course videos retrieved successfully')
   list(
-    @Param('courseId') courseId: string,
+    @Param('courseId', ParseUUIDPipe) courseId: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.coursesService.getCourseVideosForUser(
@@ -57,7 +58,7 @@ export class CourseVideosController {
   @ApiCreatedData(CourseVideoResponseDto)
   @ResponseMessage('Course video added successfully')
   create(
-    @Param('courseId') courseId: string,
+    @Param('courseId', ParseUUIDPipe) courseId: string,
     @Body() dto: CreateCourseVideoDto,
   ) {
     return this.coursesService.addCourseVideo(courseId, dto);
@@ -68,8 +69,8 @@ export class CourseVideosController {
   @RequireRole(...STAFF_COURSE_ROLES)
   @ResponseMessage('Course video updated successfully')
   update(
-    @Param('courseId') courseId: string,
-    @Param('videoId') videoId: string,
+    @Param('courseId', ParseUUIDPipe) courseId: string,
+    @Param('videoId', ParseUUIDPipe) videoId: string,
     @Body() dto: UpdateCourseVideoDto,
   ) {
     return this.coursesService.updateCourseVideo(courseId, videoId, dto);
@@ -81,8 +82,8 @@ export class CourseVideosController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ResponseMessage('Course video removed successfully')
   async remove(
-    @Param('courseId') courseId: string,
-    @Param('videoId') videoId: string,
+    @Param('courseId', ParseUUIDPipe) courseId: string,
+    @Param('videoId', ParseUUIDPipe) videoId: string,
   ) {
     await this.coursesService.removeCourseVideo(courseId, videoId);
   }

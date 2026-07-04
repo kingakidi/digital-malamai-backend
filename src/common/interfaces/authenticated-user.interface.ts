@@ -4,6 +4,7 @@ export interface AuthenticatedUser {
   firstName: string;
   lastName: string;
   partnerId: string | null;
+  mustChangePassword: boolean;
   role: {
     id: string;
     name: string;

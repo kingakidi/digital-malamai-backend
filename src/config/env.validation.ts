@@ -18,7 +18,8 @@ const ENV_RULES: EnvRule[] = [
   { key: 'JWT_EXPIRES_IN', required: true, nonEmpty: true },
   { key: 'SMTP_HOST', required: true },
   { key: 'SMTP_PORT', required: true, nonEmpty: true },
-  { key: 'SMTP_SECURE', required: true, nonEmpty: true },
+  { key: 'SMTP_USE_SSL', required: true, nonEmpty: true },
+  { key: 'SMTP_USE_TLS', required: true, nonEmpty: true },
   { key: 'SMTP_USER', required: true },
   { key: 'SMTP_PASS', required: true },
   { key: 'SMTP_FROM', required: true, nonEmpty: true },
@@ -40,10 +41,10 @@ const ENV_RULES: EnvRule[] = [
   { key: 'FLUTTERWAVE_BASE_URL', required: true, nonEmpty: true },
   { key: 'FLUTTERWAVE_DEFAULT_CURRENCY', required: true, nonEmpty: true },
   { key: 'DEFAULT_ONBOARDING_FEE', required: true, nonEmpty: true },
-  { key: 'SUPERADMIN_EMAIL', required: true, nonEmpty: true },
-  { key: 'SUPERADMIN_PASSWORD', required: true, nonEmpty: true },
-  { key: 'SUPERADMIN_FIRST_NAME', required: true, nonEmpty: true },
-  { key: 'SUPERADMIN_LAST_NAME', required: true, nonEmpty: true },
+  { key: 'SUPER_ADMIN_EMAIL', required: true, nonEmpty: true },
+  { key: 'SUPER_ADMIN_PASSWORD', required: true, nonEmpty: true },
+  { key: 'SUPER_ADMIN_FIRST_NAME', required: true, nonEmpty: true },
+  { key: 'SUPER_ADMIN_LAST_NAME', required: true, nonEmpty: true },
 ];
 
 export function validateEnvironment(
@@ -84,6 +85,29 @@ export function validateEnvironment(
 
   if (!['true', 'false', '1', '0', 'yes', 'no', 'on', 'off'].includes(smsEnabled)) {
     errors.push('SMS_ENABLED must be true or false');
+  }
+
+  for (const key of ['SMTP_USE_SSL', 'SMTP_USE_TLS'] as const) {
+    const value = String(config[key] ?? '')
+      .trim()
+      .toLowerCase();
+
+    if (!['true', 'false', '1', '0', 'yes', 'no', 'on', 'off'].includes(value)) {
+      errors.push(`${key} must be true or false`);
+    }
+  }
+
+  const corsOrigins = String(config.CORS_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  for (const origin of corsOrigins) {
+    if (!/^https?:\/\/.+/i.test(origin)) {
+      errors.push(
+        `CORS_ORIGINS entry "${origin}" must be a full origin (e.g. http://127.0.0.1:5500)`,
+      );
+    }
   }
 
   if (errors.length > 0) {

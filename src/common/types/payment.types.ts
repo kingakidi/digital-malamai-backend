@@ -28,14 +28,18 @@ export interface PaymentMetadata {
   paidFor?: PaidFor | string;
   email?: string;
   courseId?: string;
+  partnerId?: string;
+  accessCode?: string;
+  fullName?: string;
+  phone?: string;
 }
 
 export interface FlutterwaveVerifyData {
-  id: number;
+  id: number | string;
   tx_ref: string;
-  flw_ref: string;
+  flw_ref?: string;
   amount: number;
-  charged_amount: number;
+  charged_amount?: number;
   currency: string;
   status: string;
   app_fee?: number;
@@ -44,6 +48,8 @@ export interface FlutterwaveVerifyData {
   customer?: {
     email?: string;
     name?: string;
+    phone_number?: string;
+    phonenumber?: string;
   };
 }
 
@@ -53,7 +59,23 @@ export interface FlutterwaveVerifyResponse {
   data: FlutterwaveVerifyData;
 }
 
+export interface FlutterwaveTransactionsListResponse {
+  status: string;
+  message: string;
+  meta?: {
+    page_info?: {
+      total: number;
+      current_page: number;
+      total_pages: number;
+    };
+  };
+  data: FlutterwaveVerifyData[];
+}
+
 export interface FlutterwaveWebhookPayload {
-  event: string;
-  data: FlutterwaveVerifyData;
+  id?: string;
+  type?: string;
+  event?: string;
+  timestamp?: number;
+  data: FlutterwaveVerifyData | Record<string, unknown>;
 }

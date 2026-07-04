@@ -1,12 +1,12 @@
 import {
   BadRequestException,
   Body,
-  ConflictException,
   Controller,
   Get,
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -25,10 +25,11 @@ import {
   ApiCreatedData,
   ApiOkData,
   ApiOkPaginated,
+  MessageResponseDto,
   UserResponseDto,
 } from '../common/swagger';
 import { AdminPatchUserDto } from './dto/admin-patch-user.dto';
-import { CreateUserDto } from './dto/create-user.dto';
+import { CreateStaffUserDto } from './dto/create-staff-user.dto';
 import { UserService } from './user.service';
 
 @ApiTags('admin/users')
@@ -56,26 +57,25 @@ export class AdminUsersController {
   @HttpCode(HttpStatus.CREATED)
   @ApiCreatedData(UserResponseDto)
   @ResponseMessage('Staff account created successfully')
-  async createStaff(
-    @Body() createUserDto: CreateUserDto,
-    @CurrentUser() user: AuthenticatedUser,
-  ) {
-    const existing = await this.userService.findByEmail(createUserDto.email);
-
-    if (existing) {
-      throw new ConflictException('Email already exists');
-    }
-
+  async createStaff(@Body() createUserDto: CreateStaffUserDto) {
     const created = await this.userService.createStaffAccount(createUserDto);
 
     return this.userService.sanitizeUser(created);
+  }
+
+  @Post(':id/resend-welcome-email')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOkData(MessageResponseDto)
+  @ResponseMessage('Welcome email has been queued')
+  resendWelcomeEmail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.userService.resendStaffWelcomeEmail(id);
   }
 
   @Patch(':id')
   @ApiOkData(UserResponseDto)
   @ResponseMessage('Staff account updated successfully')
   patchStaff(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AdminPatchUserDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {

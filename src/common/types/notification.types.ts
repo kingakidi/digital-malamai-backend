@@ -13,4 +13,6 @@ export enum NotificationType {
   OTP = 'otp',
   ONBOARDING_RECEIPT = 'onboarding_receipt',
   COURSE_DELIVERY = 'course_delivery',
+  PARTNER_WELCOME = 'partner_welcome',
+  STAFF_WELCOME = 'staff_welcome',
 }

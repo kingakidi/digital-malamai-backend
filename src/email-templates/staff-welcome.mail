@@ -1,0 +1,16 @@
+Subject: Your Digital Malamai staff account
+
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #222; line-height: 1.6;">
+  <h2>Welcome to Digital Malamai</h2>
+  <p>Hi {{firstName}},</p>
+  <p>Your staff account has been created. Use the credentials below to sign in:</p>
+  <p><strong>Email:</strong> {{email}}</p>
+  <p><strong>Temporary password:</strong> {{temporaryPassword}}</p>
+  {{loginUrlBlock}}
+  <p>For security, you will be asked to change this password immediately after your first login.</p>
+  <p>If you did not expect this email, please contact support.</p>
+  <p>— Digital Malamai</p>
+</body>
+</html>

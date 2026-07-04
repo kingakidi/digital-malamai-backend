@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Student Signup — Digital Malamai</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f6f8;
+        --card: #ffffff;
+        --text: #1a1f2c;
+        --muted: #5c667a;
+        --border: #d8dee8;
+        --primary: #0f6b4c;
+        --primary-hover: #0c573d;
+        --danger: #b42318;
+        --success: #067647;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background: linear-gradient(180deg, #eef3f1 0%, var(--bg) 100%);
+        color: var(--text);
+        min-height: 100vh;
+      }
+
+      .wrap {
+        max-width: 560px;
+        margin: 0 auto;
+        padding: 32px 16px 48px;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 28px;
+        box-shadow: 0 10px 30px rgba(16, 24, 40, 0.06);
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 1.6rem;
+      }
+
+      .lead {
+        margin: 0 0 24px;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+
+      label {
+        display: block;
+        font-size: 0.9rem;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+
+      input,
+      select {
+        width: 100%;
+        padding: 11px 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 1rem;
+        margin-bottom: 16px;
+        background: #fff;
+      }
+
+      input:focus,
+      select:focus {
+        outline: 2px solid rgba(15, 107, 76, 0.2);
+        border-color: var(--primary);
+      }
+
+      .fee-box {
+        background: #f7faf9;
+        border: 1px solid #cfe4db;
+        border-radius: 8px;
+        padding: 12px 14px;
+        margin-bottom: 18px;
+      }
+
+      .fee-box strong {
+        font-size: 1.15rem;
+      }
+
+      .fee-box span {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      button,
+      .checkout-btn {
+        width: 100%;
+        border: 0;
+        border-radius: 8px;
+        padding: 13px 16px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        background: var(--primary);
+        color: #fff;
+      }
+
+      button:hover,
+      .checkout-btn:hover {
+        background: var(--primary-hover);
+      }
+
+      button:disabled {
+        opacity: 0.65;
+        cursor: not-allowed;
+      }
+
+      .message {
+        border-radius: 8px;
+        padding: 12px 14px;
+        margin-bottom: 16px;
+        line-height: 1.45;
+        font-size: 0.95rem;
+      }
+
+      .message.error {
+        background: #fef3f2;
+        border: 1px solid #fecdca;
+        color: var(--danger);
+      }
+
+      .message.success {
+        background: #ecfdf3;
+        border: 1px solid #abefc6;
+        color: var(--success);
+      }
+
+      .message.info {
+        background: #eff8ff;
+        border: 1px solid #b2ddff;
+        color: #175cd3;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .footnote {
+        margin-top: 18px;
+        color: var(--muted);
+        font-size: 0.82rem;
+        line-height: 1.5;
+      }
+
+      code {
+        background: #f2f4f7;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.85em;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>Student signup</h1>
+        <p class="lead">
+          Choose a partner, enter your details and access code, then pay the
+          onboarding fee. Your account is created after payment is verified.
+        </p>
+
+        <div id="statusMessage" class="message hidden" role="alert"></div>
+
+        <form id="signupForm">
+          <label for="partnerId">Partner</label>
+          <select id="partnerId" name="partnerId" required>
+            <option value="">Loading partners…</option>
+          </select>
+
+          <label for="fullName">Full name</label>
+          <input
+            id="fullName"
+            name="fullName"
+            type="text"
+            placeholder="Jane Doe"
+            required
+            autocomplete="name"
+          />
+
+          <label for="email">Email</label>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            placeholder="jane@example.com"
+            required
+            autocomplete="email"
+          />
+
+          <label for="phone">Phone</label>
+          <input
+            id="phone"
+            name="phone"
+            type="tel"
+            placeholder="08012345678"
+            required
+            autocomplete="tel"
+          />
+
+          <label for="accessCode">Access code</label>
+          <input
+            id="accessCode"
+            name="accessCode"
+            type="text"
+            placeholder="ABC123"
+            minlength="6"
+            maxlength="6"
+            pattern="[A-Za-z0-9]{6}"
+            required
+            autocapitalize="characters"
+          />
+
+          <div class="fee-box">
+            <div><span>Onboarding fee</span></div>
+            <strong id="feeDisplay">—</strong>
+          </div>
+
+          <button id="submitBtn" type="submit">Validate &amp; pay</button>
+        </form>
+
+        <!-- Flutterwave hosted checkout (submitted after API validation) -->
+        <form
+          id="paymentForm"
+          class="hidden"
+          method="POST"
+          action="https://checkout.flutterwave.com/v3/hosted/pay"
+        >
+          <input type="hidden" name="public_key" id="fwPublicKey" value="" />
+          <input type="hidden" name="tx_ref" id="fwTxRef" value="" />
+          <input type="hidden" name="amount" id="fwAmount" value="" />
+          <input type="hidden" name="currency" id="fwCurrency" value="NGN" />
+          <input type="hidden" name="redirect_url" id="fwRedirectUrl" value="" />
+          <input type="hidden" name="payment_options" value="card, ussd, banktransfer" />
+
+          <input type="hidden" name="customer[name]" id="fwCustomerName" value="" />
+          <input type="hidden" name="customer[email]" id="fwCustomerEmail" value="" />
+          <input
+            type="hidden"
+            name="customer[phone_number]"
+            id="fwCustomerPhone"
+            value=""
+          />
+
+          <input type="hidden" name="meta[paidFor]" value="onboarding" />
+          <input type="hidden" name="meta[email]" id="fwMetaEmail" value="" />
+          <input type="hidden" name="meta[partnerId]" id="fwMetaPartnerId" value="" />
+          <input
+            type="hidden"
+            name="meta[accessCode]"
+            id="fwMetaAccessCode"
+            value=""
+          />
+          <input type="hidden" name="meta[fullName]" id="fwMetaFullName" value="" />
+          <input type="hidden" name="meta[phone]" id="fwMetaPhone" value="" />
+
+          <button type="submit" class="checkout-btn">Pay with Flutterwave</button>
+        </form>
+
+        <p class="footnote">
+          Open this file with Live Server (or any static host). It calls the API at
+          <code id="apiBaseDisplay">http://localhost:3000/api/v1</code>. After payment
+          Flutterwave redirects back to this page to create your account.
+        </p>
+      </div>
+    </div>
+
+    <script>
+      const CONFIG = {
+        // Backend API (NestJS). Update port/host if your API runs elsewhere.
+        apiBaseUrl: 'http://localhost:3000/api/v1',
+        // Flutterwave public key (safe to expose in the browser).
+        flutterwavePublicKey: 'FLWPUBK_TEST-58d949e27145d7b369efaf6099b62d61-X',
+        currency: 'NGN',
+      };
+
+      function getRedirectUrl() {
+        return `${window.location.origin}${window.location.pathname}`;
+      }
+
+      const state = {
+        partners: [],
+        defaultFee: null,
+        defaultCurrency: CONFIG.currency,
+      };
+
+      const els = {
+        statusMessage: document.getElementById('statusMessage'),
+        signupForm: document.getElementById('signupForm'),
+        paymentForm: document.getElementById('paymentForm'),
+        partnerId: document.getElementById('partnerId'),
+        fullName: document.getElementById('fullName'),
+        email: document.getElementById('email'),
+        phone: document.getElementById('phone'),
+        accessCode: document.getElementById('accessCode'),
+        feeDisplay: document.getElementById('feeDisplay'),
+        submitBtn: document.getElementById('submitBtn'),
+      };
+
+      function showMessage(text, type = 'info') {
+        els.statusMessage.textContent = text;
+        els.statusMessage.className = `message ${type}`;
+        els.statusMessage.classList.remove('hidden');
+      }
+
+      function hideMessage() {
+        els.statusMessage.classList.add('hidden');
+      }
+
+      function formatMoney(amount, currency) {
+        const value = Number(amount);
+        if (Number.isNaN(value)) return '—';
+        return new Intl.NumberFormat('en-NG', {
+          style: 'currency',
+          currency: currency || CONFIG.currency,
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 2,
+        }).format(value);
+      }
+
+      function resolvePartnerFee(partner) {
+        if (partner && partner.onboardingFee != null) {
+          return Number(partner.onboardingFee);
+        }
+        return state.defaultFee != null ? Number(state.defaultFee) : null;
+      }
+
+      function updateFeeDisplay() {
+        const partner = state.partners.find((p) => p.id === els.partnerId.value);
+        const amount = resolvePartnerFee(partner);
+        const currency = state.defaultCurrency || CONFIG.currency;
+
+        if (amount == null) {
+          els.feeDisplay.textContent = '—';
+          return;
+        }
+
+        els.feeDisplay.textContent = formatMoney(amount, currency);
+      }
+
+      async function apiRequest(path, options = {}) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
+
+        try {
+          const response = await fetch(`${CONFIG.apiBaseUrl}${path}`, {
+            headers: {
+              'Content-Type': 'application/json',
+              ...(options.headers || {}),
+            },
+            ...options,
+            signal: controller.signal,
+          });
+
+          const body = await response.json().catch(() => ({}));
+
+          if (!response.ok || body.status === false) {
+            const errorText = Array.isArray(body.error)
+              ? body.error.join(', ')
+              : body.error || body.message || 'Request failed';
+            throw new Error(errorText);
+          }
+
+          return body.data;
+        } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') {
+            throw new Error('Request timed out after 30 seconds');
+          }
+          throw error;
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+
+      async function loadPartners() {
+        const pageSize = 100;
+        let page = 1;
+        let partners = [];
+        let hasNextPage = true;
+
+        while (hasNextPage) {
+          const result = await apiRequest(
+            `/partners?page=${page}&limit=${pageSize}`,
+          );
+          partners = partners.concat(result.data || []);
+          hasNextPage = Boolean(result.meta?.hasNextPage);
+          page += 1;
+        }
+
+        state.partners = partners;
+
+        els.partnerId.innerHTML = '<option value="">Select a partner</option>';
+        partners.forEach((partner) => {
+          const option = document.createElement('option');
+          option.value = partner.id;
+          option.textContent = `${partner.firstName} ${partner.lastName}`;
+          els.partnerId.appendChild(option);
+        });
+
+        updateFeeDisplay();
+      }
+
+      async function loadDefaultFee() {
+        const setting = await apiRequest('/settings/onboarding-fee');
+        state.defaultFee = setting.amount;
+        state.defaultCurrency = setting.currency || CONFIG.currency;
+        document.getElementById('fwCurrency').value = state.defaultCurrency;
+        updateFeeDisplay();
+      }
+
+      const STORAGE_KEY = 'dm_pending_registration';
+      const VERIFY_LOCK_KEY = 'dm_verify_lock';
+
+      function savePendingRegistration(values, txRef) {
+        const payload = { ...values, txRef };
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      }
+
+      function loadPendingRegistration() {
+        for (const storage of [sessionStorage, localStorage]) {
+          try {
+            const raw = storage.getItem(STORAGE_KEY);
+            if (raw) {
+              return JSON.parse(raw);
+            }
+          } catch {
+            // try next storage
+          }
+        }
+        return {};
+      }
+
+      function clearPendingRegistration() {
+        sessionStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(STORAGE_KEY);
+      }
+
+      function getPaymentReturnParams() {
+        const params = new URLSearchParams(window.location.search);
+        const status = params.get('status');
+        const transactionId = params.get('transaction_id');
+        const txRef = params.get('tx_ref');
+
+        if (!status && !transactionId && !txRef) {
+          return null;
+        }
+
+        return { status, transactionId, txRef };
+      }
+
+      function clearPaymentReturnParams() {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
+      function getVerifyLockKey(txRef, transactionId) {
+        return `dm_verified:${txRef || transactionId}`;
+      }
+
+      function buildTxRef() {
+        const suffix = Math.random().toString(36).slice(2, 8);
+        return `dm-onboard-${Date.now()}-${suffix}`;
+      }
+
+      function getFormValues() {
+        return {
+          partnerId: els.partnerId.value,
+          fullName: els.fullName.value.trim(),
+          email: els.email.value.trim().toLowerCase(),
+          phone: els.phone.value.trim(),
+          accessCode: els.accessCode.value.trim().toUpperCase(),
+        };
+      }
+
+      function fillPaymentForm(values, amount, txRef) {
+        const redirectUrl = getRedirectUrl();
+
+        document.getElementById('fwPublicKey').value = CONFIG.flutterwavePublicKey;
+        document.getElementById('fwTxRef').value = txRef;
+        document.getElementById('fwAmount').value = String(amount);
+        document.getElementById('fwCurrency').value =
+          state.defaultCurrency || CONFIG.currency;
+        document.getElementById('fwRedirectUrl').value = redirectUrl;
+
+        document.getElementById('fwCustomerName').value = values.fullName;
+        document.getElementById('fwCustomerEmail').value = values.email;
+        document.getElementById('fwCustomerPhone').value = values.phone;
+
+        document.getElementById('fwMetaEmail').value = values.email;
+        document.getElementById('fwMetaPartnerId').value = values.partnerId;
+        document.getElementById('fwMetaAccessCode').value = values.accessCode;
+        document.getElementById('fwMetaFullName').value = values.fullName;
+        document.getElementById('fwMetaPhone').value = values.phone;
+      }
+
+      async function handleSignupSubmit(event) {
+        event.preventDefault();
+        hideMessage();
+
+        const values = getFormValues();
+        const partner = state.partners.find((p) => p.id === values.partnerId);
+        const amount = resolvePartnerFee(partner);
+
+        if (!values.partnerId) {
+          showMessage('Please select a partner.', 'error');
+          return;
+        }
+
+        if (amount == null || amount <= 0) {
+          showMessage('Onboarding fee is not configured for this partner.', 'error');
+          return;
+        }
+
+        els.submitBtn.disabled = true;
+        els.submitBtn.textContent = 'Checking payment history…';
+
+        try {
+          const eligibility = await apiRequest(
+            '/auth/student/check-payment-eligibility',
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                email: values.email,
+                paidFor: 'onboarding',
+                partnerId: values.partnerId,
+              }),
+            },
+          );
+
+          if (!eligibility.eligible) {
+            showMessage(eligibility.message, 'error');
+            return;
+          }
+
+          els.submitBtn.textContent = 'Validating…';
+
+          const validation = await apiRequest('/auth/student/register', {
+            method: 'POST',
+            body: JSON.stringify(values),
+          });
+
+          const txRef = buildTxRef();
+          savePendingRegistration(values, txRef);
+          fillPaymentForm(values, validation.onboardingFee ?? amount, txRef);
+          showMessage(
+            'Details validated. Redirecting to Flutterwave checkout…',
+            'success',
+          );
+
+          document.getElementById('paymentForm').requestSubmit();
+        } catch (error) {
+          showMessage(error.message || 'Validation failed.', 'error');
+        } finally {
+          els.submitBtn.disabled = false;
+          els.submitBtn.textContent = 'Validate & pay';
+        }
+      }
+
+      async function handlePaymentReturn(returnParams) {
+        const { status, transactionId, txRef } = returnParams;
+        const verifyLockKey = getVerifyLockKey(txRef, transactionId);
+
+        els.signupForm.classList.add('hidden');
+        document.getElementById('paymentForm').classList.add('hidden');
+
+        if (sessionStorage.getItem(verifyLockKey) === 'done') {
+          showMessage(
+            'Payment already processed for this transaction. You can log in with your email or phone and access code.',
+            'success',
+          );
+          return;
+        }
+
+        if (sessionStorage.getItem(VERIFY_LOCK_KEY) === 'running') {
+          showMessage('Payment verification is already in progress…', 'info');
+          return;
+        }
+
+        if (status !== 'successful') {
+          showMessage(
+            `Payment was not completed (status: ${status || 'unknown'}). You can try again.`,
+            'error',
+          );
+          els.signupForm.classList.remove('hidden');
+          return;
+        }
+
+        if (!transactionId && !txRef) {
+          showMessage(
+            'Payment returned without a transaction reference. Contact support with your payment receipt.',
+            'error',
+          );
+          return;
+        }
+
+        sessionStorage.setItem(VERIFY_LOCK_KEY, 'running');
+        showMessage('Payment received. Creating your student account…', 'info');
+
+        try {
+          const stored = loadPendingRegistration();
+          const payload = {
+            ...(txRef ? { txRef: String(txRef) } : {}),
+            ...(transactionId && !txRef
+              ? { transactionId: String(transactionId) }
+              : {}),
+            email: stored.email,
+            partnerId: stored.partnerId,
+            accessCode: stored.accessCode,
+            fullName: stored.fullName,
+            phone: stored.phone,
+          };
+
+          const result = await apiRequest('/auth/student/verify-onboarding-payment', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
+
+          clearPendingRegistration();
+          sessionStorage.setItem(verifyLockKey, 'done');
+
+          const message = result.studentAlreadyRegistered
+            ? `Account already exists. You can log in with your email or phone and access code. Transaction: ${result.externalTransactionId || txRef || transactionId}.`
+            : `Account created successfully. You can now log in with your email or phone and access code. Transaction: ${result.externalTransactionId || txRef || transactionId}.`;
+
+          showMessage(message, 'success');
+        } catch (error) {
+          showMessage(
+            `${error.message || 'Account setup failed.'} If payment succeeded, use requery or wait for the webhook.`,
+            'error',
+          );
+          els.signupForm.classList.remove('hidden');
+        } finally {
+          sessionStorage.removeItem(VERIFY_LOCK_KEY);
+        }
+      }
+
+      async function init() {
+        document.getElementById('apiBaseDisplay').textContent = CONFIG.apiBaseUrl;
+
+        const returnParams = getPaymentReturnParams();
+
+        if (returnParams) {
+          clearPaymentReturnParams();
+          await handlePaymentReturn(returnParams);
+        }
+
+        try {
+          await Promise.all([loadDefaultFee(), loadPartners()]);
+        } catch (error) {
+          if (!returnParams) {
+            showMessage(
+              `Could not load signup page data: ${error.message}. Check that the API is running and CORS allows this origin.`,
+              'error',
+            );
+            els.partnerId.innerHTML =
+              '<option value="">Unable to load partners</option>';
+          }
+        }
+      }
+
+      els.partnerId.addEventListener('change', updateFeeDisplay);
+      els.signupForm.addEventListener('submit', handleSignupSubmit);
+      init();
+    </script>
+  </body>
+</html>
