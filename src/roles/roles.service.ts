@@ -6,6 +6,7 @@ import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { PaginatedResult } from '../common/interfaces/pagination.interface';
 import { PermissionGroupDefinition } from '../common/interfaces/permission-catalog.interface';
 import { SortOrder } from '../common/types/sort-order.type';
+import { RoleName } from '../common/types/permission.types';
 import {
   buildPaginatedResult,
   getPaginationSkip,
@@ -30,6 +31,14 @@ export class RolesService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    const legacyStudent = await this.rolesRepository.findOneBy({ name: 'user' });
+
+    if (legacyStudent) {
+      legacyStudent.name = RoleName.STUDENT;
+      legacyStudent.title = 'Student';
+      await this.rolesRepository.save(legacyStudent);
+    }
+
     for (const roleDefinition of DEFAULT_ROLES) {
       const existing = await this.rolesRepository.findOneBy({
         name: roleDefinition.name,
@@ -88,7 +97,7 @@ export class RolesService implements OnModuleInit {
     );
   }
 
-  async findOne(id: number): Promise<SerializedRole> {
+  async findOne(id: string): Promise<SerializedRole> {
     const role = await this.rolesRepository.findOneBy({ id });
 
     if (!role) {
@@ -106,7 +115,7 @@ export class RolesService implements OnModuleInit {
     return this.rolesRepository.findOneBy({ title });
   }
 
-  async update(id: number, updateRoleDto: UpdateRoleDto): Promise<SerializedRole> {
+  async update(id: string, updateRoleDto: UpdateRoleDto): Promise<SerializedRole> {
     const role = await this.findOneEntity(id);
 
     if (updateRoleDto.title !== undefined) {
@@ -121,16 +130,16 @@ export class RolesService implements OnModuleInit {
     return this.serializeRole(saved);
   }
 
-  async remove(id: number): Promise<void> {
+  async remove(id: string): Promise<void> {
     await this.findOneEntity(id);
     await this.rolesRepository.delete(id);
   }
 
-  async findEntityById(id: number): Promise<Role> {
+  async findEntityById(id: string): Promise<Role> {
     return this.findOneEntity(id);
   }
 
-  private async findOneEntity(id: number): Promise<Role> {
+  private async findOneEntity(id: string): Promise<Role> {
     const role = await this.rolesRepository.findOneBy({ id });
 
     if (!role) {

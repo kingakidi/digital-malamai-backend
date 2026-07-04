@@ -1,10 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsEmail,
-  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   MinLength,
 } from 'class-validator';
 
@@ -29,13 +29,13 @@ export class CreateUserDto {
   password: string;
 
   @ApiProperty({ description: 'Role ID from /roles' })
-  @IsInt()
-  roleId: number;
+  @IsUUID()
+  roleId: string;
 
   @ApiPropertyOptional({
-    description: 'Partner user ID — links this user to a partner account',
+    description: 'Partner org ID — links student or partner user to a partner profile',
   })
   @IsOptional()
-  @IsInt()
-  partnerId?: number;
+  @IsUUID()
+  partnerId?: string;
 }

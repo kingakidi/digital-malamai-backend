@@ -24,6 +24,13 @@ import {
   PermissionAction,
   PermissionResource,
 } from '../common/types/permission.types';
+import {
+  ApiCreatedData,
+  ApiOkData,
+  ApiOkNull,
+  ApiOkPaginated,
+  UserResponseDto,
+} from '../common/swagger';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserService } from './user.service';
@@ -37,6 +44,7 @@ export class UserController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @ApiCreatedData(UserResponseDto)
   @RequirePermission(PermissionResource.USERS, PermissionAction.CREATE)
   @ResponseMessage('User created successfully')
   async create(@Body() createUserDto: CreateUserDto) {
@@ -50,6 +58,7 @@ export class UserController {
   }
 
   @Get()
+  @ApiOkPaginated(UserResponseDto)
   @RequirePermission(PermissionResource.USERS, PermissionAction.READ)
   @ResponseMessage('Users retrieved successfully')
   async findAll(
@@ -64,17 +73,19 @@ export class UserController {
   }
 
   @Get(':id')
+  @ApiOkData(UserResponseDto)
   @RequirePermission(PermissionResource.USERS, PermissionAction.READ)
   @ResponseMessage('User retrieved successfully')
   async findOne(
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    const found = await this.userService.findOne(+id, user);
+    const found = await this.userService.findOne(id, user);
     return this.userService.sanitizeUser(found);
   }
 
   @Put(':id')
+  @ApiOkData(UserResponseDto)
   @RequirePermission(PermissionResource.USERS, PermissionAction.UPDATE)
   @ResponseMessage('User updated successfully')
   async update(
@@ -82,18 +93,19 @@ export class UserController {
     @Body() updateUserDto: UpdateUserDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    const updated = await this.userService.update(+id, updateUserDto, user);
+    const updated = await this.userService.update(id, updateUserDto, user);
     return this.userService.sanitizeUser(updated);
   }
 
   @Delete(':id')
+  @ApiOkNull()
   @RequirePermission(PermissionResource.USERS, PermissionAction.DELETE)
   @ResponseMessage('User deleted successfully')
   async remove(
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    await this.userService.remove(+id, user);
+    await this.userService.remove(id, user);
     return null;
   }
 }

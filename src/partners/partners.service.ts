@@ -1,0 +1,196 @@
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { PaginatedResult } from '../common/interfaces/pagination.interface';
+import { PartnerStatus } from '../common/types/partner-status.type';
+import { RoleName } from '../common/types/permission.types';
+import { SortOrder } from '../common/types/sort-order.type';
+import {
+  buildPaginatedResult,
+  getPaginationSkip,
+} from '../common/utils/pagination.util';
+import { RolesService } from '../roles/roles.service';
+import { User } from '../user/entities/user.entity';
+import { UserService } from '../user/user.service';
+import { CreatePartnerWithUserDto } from './dto/create-partner-with-user.dto';
+import { CreatePartnerDto } from './dto/create-partner.dto';
+import { UpdatePartnerFeesDto } from './dto/update-partner-fees.dto';
+import { UpdatePartnerDto } from './dto/update-partner.dto';
+import { Partner } from './entities/partner.entity';
+
+const ALLOWED_SORT_FIELDS = [
+  'id',
+  'firstName',
+  'lastName',
+  'email',
+  'createdAt',
+  'updatedAt',
+];
+
+@Injectable()
+export class PartnersService {
+  constructor(
+    @InjectRepository(Partner)
+    private readonly partnersRepository: Repository<Partner>,
+    private readonly dataSource: DataSource,
+    private readonly rolesService: RolesService,
+    private readonly userService: UserService,
+  ) {}
+
+  async create(createPartnerDto: CreatePartnerDto): Promise<Partner> {
+    const partner = this.partnersRepository.create(createPartnerDto);
+    return this.partnersRepository.save(partner);
+  }
+
+  async createWithUser(dto: CreatePartnerWithUserDto) {
+    const existingUser = await this.userService.findByEmail(dto.email.toLowerCase());
+
+    if (existingUser) {
+      throw new ConflictException('A user with this email already exists');
+    }
+
+    const partnerRole = await this.rolesService.findByName(RoleName.PARTNER);
+
+    if (!partnerRole) {
+      throw new NotFoundException('Partner role is not configured');
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const partner = manager.create(Partner, {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        email: dto.email.toLowerCase(),
+        phoneNumber: dto.phoneNumber ?? null,
+        address: dto.address ?? null,
+        description: dto.description ?? null,
+        logoUrl: dto.logoUrl ?? null,
+        onboardingFee: dto.onboardingFee ?? null,
+        commissionType: dto.commissionType ?? null,
+        commissionValue: dto.commissionValue ?? null,
+        onboardPercentage: dto.onboardPercentage ?? 0,
+        status: dto.status ?? PartnerStatus.ACTIVE,
+      });
+
+      const savedPartner = await manager.save(partner);
+
+      const user = manager.create(User, {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        email: dto.email.toLowerCase(),
+        password: dto.password,
+        role: partnerRole,
+        partnerId: savedPartner.id,
+      });
+
+      const savedUser = await manager.save(user);
+
+      return {
+        partner: savedPartner,
+        user: this.userService.sanitizeUser(savedUser),
+      };
+    });
+  }
+
+  async findAllActive(
+    query: PaginationQueryDto,
+  ): Promise<PaginatedResult<Partner>> {
+    const skip = getPaginationSkip(query.page, query.limit);
+    const sortBy = ALLOWED_SORT_FIELDS.includes(query.sortBy ?? '')
+      ? query.sortBy!
+      : 'firstName';
+
+    const qb = this.partnersRepository
+      .createQueryBuilder('partner')
+      .where('partner.status = :status', { status: PartnerStatus.ACTIVE });
+
+    if (query.search) {
+      qb.andWhere(
+        '(partner.firstName LIKE :search OR partner.lastName LIKE :search OR partner.email LIKE :search)',
+        { search: `%${query.search}%` },
+      );
+    }
+
+    qb.orderBy(`partner.${sortBy}`, query.sortOrder ?? SortOrder.ASC)
+      .skip(skip)
+      .take(query.limit);
+
+    const [items, total] = await qb.getManyAndCount();
+    return buildPaginatedResult(items, total, query);
+  }
+
+  async findAll(
+    query: PaginationQueryDto,
+  ): Promise<PaginatedResult<Partner>> {
+    const skip = getPaginationSkip(query.page, query.limit);
+    const sortBy = ALLOWED_SORT_FIELDS.includes(query.sortBy ?? '')
+      ? query.sortBy!
+      : 'createdAt';
+
+    const qb = this.partnersRepository.createQueryBuilder('partner');
+
+    if (query.search) {
+      qb.andWhere(
+        '(partner.firstName LIKE :search OR partner.lastName LIKE :search OR partner.email LIKE :search)',
+        { search: `%${query.search}%` },
+      );
+    }
+
+    qb.orderBy(`partner.${sortBy}`, query.sortOrder ?? SortOrder.DESC)
+      .skip(skip)
+      .take(query.limit);
+
+    const [items, total] = await qb.getManyAndCount();
+    return buildPaginatedResult(items, total, query);
+  }
+
+  async findOne(id: string): Promise<Partner> {
+    return this.findOneEntity(id);
+  }
+
+  async findOneEntity(id: string): Promise<Partner> {
+    const partner = await this.partnersRepository.findOneBy({ id });
+
+    if (!partner) {
+      throw new NotFoundException(`Partner ${id} not found`);
+    }
+
+    return partner;
+  }
+
+  async update(id: string, updatePartnerDto: UpdatePartnerDto): Promise<Partner> {
+    const partner = await this.findOneEntity(id);
+    Object.assign(partner, updatePartnerDto);
+    return this.partnersRepository.save(partner);
+  }
+
+  async updateFees(id: string, dto: UpdatePartnerFeesDto): Promise<Partner> {
+    const partner = await this.findOneEntity(id);
+
+    if (dto.onboardingFee !== undefined) {
+      partner.onboardingFee = dto.onboardingFee;
+    }
+
+    if (dto.commissionType !== undefined) {
+      partner.commissionType = dto.commissionType;
+    }
+
+    if (dto.commissionValue !== undefined) {
+      partner.commissionValue = dto.commissionValue;
+    }
+
+    if (dto.onboardPercentage !== undefined) {
+      partner.onboardPercentage = dto.onboardPercentage;
+    }
+
+    return this.partnersRepository.save(partner);
+  }
+
+  async disable(id: string): Promise<Partner> {
+    return this.update(id, { status: PartnerStatus.DISABLED });
+  }
+}

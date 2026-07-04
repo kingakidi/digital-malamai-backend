@@ -1,0 +1,10 @@
+Subject: Course access — {{courseTitle}}
+
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #222; line-height: 1.6;">
+  <p>Hi {{firstName}},</p>
+  <p>Your course <strong>{{courseTitle}}</strong> is ready.</p>
+  <pre style="font-family: inherit; white-space: pre-wrap;">{{links}}</pre>
+</body>
+</html>

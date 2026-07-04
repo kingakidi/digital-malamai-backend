@@ -1,6 +1,7 @@
 import { registerAs } from '@nestjs/config';
 
 export default registerAs('app', () => ({
-  port: parseInt(process.env.PORT ?? '3000', 10),
-  swaggerPath: process.env.SWAGGER_PATH ?? 'api',
+  port: parseInt(process.env.PORT!, 10),
+  apiPrefix: process.env.API_PREFIX!,
+  swaggerPath: process.env.SWAGGER_PATH!,
 }));

@@ -11,7 +11,7 @@ import { UserService } from '../../../user/user.service';
 import { AuthenticatedUser } from '../../interfaces/authenticated-user.interface';
 
 interface JwtPayload {
-  sub: number;
+  sub: string;
   email: string;
 }
 
@@ -49,6 +49,7 @@ export class JwtAuthGuard implements CanActivate {
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
+        partnerId: user.partnerId,
         role: {
           id: user.role.id,
           name: user.role.name,

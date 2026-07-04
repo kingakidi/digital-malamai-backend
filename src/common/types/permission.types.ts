@@ -8,6 +8,8 @@ export enum PermissionAction {
 export enum PermissionResource {
   USERS = 'users',
   ROLES = 'roles',
+  PARTNERS = 'partners',
+  ACCESS_CODES = 'access_codes',
   FINANCE = 'finance',
 }
 
@@ -22,5 +24,5 @@ export enum RoleName {
   ADMIN = 'admin',
   MANAGER = 'manager',
   PARTNER = 'partner',
-  USER = 'user',
+  STUDENT = 'student',
 }

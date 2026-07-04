@@ -43,6 +43,11 @@ export const DEFAULT_ROLES: DefaultRoleDefinition[] = [
         ],
         scope: PermissionScope.ALL,
       },
+      {
+        resource: PermissionResource.PARTNERS,
+        actions: [PermissionAction.READ],
+        scope: PermissionScope.ALL,
+      },
     ],
   },
   {
@@ -55,6 +60,16 @@ export const DEFAULT_ROLES: DefaultRoleDefinition[] = [
         scope: PermissionScope.LINKED,
       },
       {
+        resource: PermissionResource.PARTNERS,
+        actions: [PermissionAction.READ, PermissionAction.UPDATE],
+        scope: PermissionScope.OWN,
+      },
+      {
+        resource: PermissionResource.ACCESS_CODES,
+        actions: [PermissionAction.READ],
+        scope: PermissionScope.LINKED,
+      },
+      {
         resource: PermissionResource.FINANCE,
         actions: [PermissionAction.READ],
         scope: PermissionScope.LINKED,
@@ -62,8 +77,8 @@ export const DEFAULT_ROLES: DefaultRoleDefinition[] = [
     ],
   },
   {
-    name: RoleName.USER,
-    title: 'User',
+    name: RoleName.STUDENT,
+    title: 'Student',
     permissions: [
       {
         resource: PermissionResource.USERS,

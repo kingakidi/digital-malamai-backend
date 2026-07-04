@@ -24,6 +24,14 @@ import {
   PermissionAction,
   PermissionResource,
 } from '../common/types/permission.types';
+import {
+  ApiCreatedData,
+  ApiOkData,
+  ApiOkNull,
+  ApiOkPaginated,
+  PermissionGroupDefinitionDto,
+  RoleResponseDto,
+} from '../common/swagger';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { RolesService } from './roles.service';
@@ -36,6 +44,7 @@ export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 
   @Get('permissions/groups')
+  @ApiOkData(PermissionGroupDefinitionDto, { isArray: true })
   @RequirePermission(PermissionResource.ROLES, PermissionAction.READ)
   @ResponseMessage('Permission groups retrieved successfully')
   getPermissionGroups() {
@@ -44,6 +53,7 @@ export class RolesController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @ApiCreatedData(RoleResponseDto)
   @RequirePermission(PermissionResource.ROLES, PermissionAction.CREATE)
   @ResponseMessage('Role created successfully')
   async create(@Body() createRoleDto: CreateRoleDto) {
@@ -61,6 +71,7 @@ export class RolesController {
   }
 
   @Get()
+  @ApiOkPaginated(RoleResponseDto)
   @RequirePermission(PermissionResource.ROLES, PermissionAction.READ)
   @ResponseMessage('Roles retrieved successfully')
   findAll(
@@ -71,24 +82,27 @@ export class RolesController {
   }
 
   @Get(':id')
+  @ApiOkData(RoleResponseDto)
   @RequirePermission(PermissionResource.ROLES, PermissionAction.READ)
   @ResponseMessage('Role retrieved successfully')
   findOne(@Param('id') id: string) {
-    return this.rolesService.findOne(+id);
+    return this.rolesService.findOne(id);
   }
 
   @Put(':id')
+  @ApiOkData(RoleResponseDto)
   @RequirePermission(PermissionResource.ROLES, PermissionAction.UPDATE)
   @ResponseMessage('Role updated successfully')
   update(@Param('id') id: string, @Body() updateRoleDto: UpdateRoleDto) {
-    return this.rolesService.update(+id, updateRoleDto);
+    return this.rolesService.update(id, updateRoleDto);
   }
 
   @Delete(':id')
+  @ApiOkNull()
   @RequirePermission(PermissionResource.ROLES, PermissionAction.DELETE)
   @ResponseMessage('Role deleted successfully')
   async remove(@Param('id') id: string) {
-    await this.rolesService.remove(+id);
+    await this.rolesService.remove(id);
     return null;
   }
 }

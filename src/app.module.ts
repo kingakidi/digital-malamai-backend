@@ -2,21 +2,46 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AccessCodesModule } from './access-codes/access-codes.module';
 import { AbacModule } from './common/abac/abac.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
+import { validateEnvironment } from './config/env.validation';
+import flutterwaveConfig from './config/flutterwave.config';
+import messagingConfig from './config/messaging.config';
+import otpConfig from './config/otp.config';
+import smtpConfig from './config/smtp.config';
 import jwtConfig from './config/jwt.config';
 import { AuthModule } from './auth/auth.module';
+import { CoursesModule } from './courses/courses.module';
+import { MailModule } from './mail/mail.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { OtpsModule } from './otps/otps.module';
+import { PartnersModule } from './partners/partners.module';
+import { PaymentsModule } from './payments/payments.module';
 import { RolesModule } from './roles/roles.module';
+import { SettingsModule } from './settings/settings.module';
+import { StudentsModule } from './students/students.module';
 import { UserModule } from './user/user.module';
+import { AdminModule } from './admin/admin.module';
+import { WelcomeModule } from './welcome/welcome.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [databaseConfig, jwtConfig, appConfig],
+      validate: validateEnvironment,
+      load: [
+        databaseConfig,
+        jwtConfig,
+        appConfig,
+        smtpConfig,
+        otpConfig,
+        messagingConfig,
+        flutterwaveConfig,
+      ],
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -33,9 +58,20 @@ import { UserModule } from './user/user.module';
       }),
     }),
     AbacModule,
+    WelcomeModule,
     RolesModule,
     UserModule,
     AuthModule,
+    MailModule,
+    NotificationsModule,
+    OtpsModule,
+    PartnersModule,
+    AccessCodesModule,
+    StudentsModule,
+    SettingsModule,
+    CoursesModule,
+    PaymentsModule,
+    AdminModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },

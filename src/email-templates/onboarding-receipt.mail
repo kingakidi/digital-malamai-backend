@@ -1,0 +1,11 @@
+Subject: Onboarding payment received — Digital Malamai
+
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; color: #222; line-height: 1.6;">
+  <p>Hi {{firstName}},</p>
+  <p>Your onboarding payment of {{currency}} {{amount}} was successful.</p>
+  <p>Thank you for joining Digital Malamai.</p>
+  <p>— Digital Malamai</p>
+</body>
+</html>

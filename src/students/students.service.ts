@@ -1,0 +1,235 @@
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
+import { RegisterStudentDto } from '../auth/dto/register-student.dto';
+import { StudentSignInDto } from '../auth/dto/student-sign-in.dto';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { PaginatedResult } from '../common/interfaces/pagination.interface';
+import { OnboardingStatus } from '../common/types/onboarding-status.type';
+import { PartnerStatus } from '../common/types/partner-status.type';
+import { RoleName } from '../common/types/permission.types';
+import { SortOrder } from '../common/types/sort-order.type';
+import {
+  buildPaginatedResult,
+  getPaginationSkip,
+} from '../common/utils/pagination.util';
+import { AccessCode } from '../access-codes/entities/access-code.entity';
+import { PartnersService } from '../partners/partners.service';
+import { RolesService } from '../roles/roles.service';
+import { User } from '../user/entities/user.entity';
+import { UserService } from '../user/user.service';
+import * as bcrypt from 'bcrypt';
+
+@Injectable()
+export class StudentsService {
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly userService: UserService,
+    private readonly rolesService: RolesService,
+    private readonly partnersService: PartnersService,
+    @InjectRepository(AccessCode)
+    private readonly accessCodesRepository: Repository<AccessCode>,
+    @InjectRepository(User)
+    private readonly usersRepository: Repository<User>,
+  ) {}
+
+  async register(dto: RegisterStudentDto) {
+    const partner = await this.partnersService.findOneEntity(dto.partnerId);
+
+    if (partner.status !== PartnerStatus.ACTIVE) {
+      throw new ConflictException('Partner is not active');
+    }
+
+    const existingEmail = await this.userService.findByEmail(dto.email);
+    if (existingEmail) {
+      throw new ConflictException('Email already exists');
+    }
+
+    const existingPhone = await this.userService.findByPhone(dto.phone);
+    if (existingPhone) {
+      throw new ConflictException('Phone number already exists');
+    }
+
+    const studentRole = await this.rolesService.findByName(RoleName.STUDENT);
+    if (!studentRole) {
+      throw new NotFoundException('Student role is not configured');
+    }
+
+    const normalizedCode = dto.accessCode.toUpperCase();
+    const { firstName, lastName } = this.splitFullName(dto.fullName);
+
+    const user = await this.dataSource.transaction(async (manager) => {
+      const accessCode = await manager
+        .createQueryBuilder(AccessCode, 'accessCode')
+        .setLock('pessimistic_write')
+        .where('accessCode.code = :code', { code: normalizedCode })
+        .andWhere('accessCode.partnerId = :partnerId', {
+          partnerId: dto.partnerId,
+        })
+        .getOne();
+
+      if (!accessCode) {
+        throw new ConflictException('Invalid access code for this partner');
+      }
+
+      if (accessCode.isUsed) {
+        throw new ConflictException('Access code has already been used');
+      }
+
+      if (accessCode.expiresAt && accessCode.expiresAt < new Date()) {
+        throw new ConflictException('Access code has expired');
+      }
+
+      const student = manager.create(User, {
+        firstName,
+        lastName,
+        email: dto.email.toLowerCase(),
+        phone: dto.phone,
+        password: null,
+        role: studentRole,
+        partnerId: dto.partnerId,
+        accessCodeId: accessCode.id,
+        onboardingStatus: OnboardingStatus.PENDING,
+      });
+
+      const savedStudent = await manager.save(student);
+
+      accessCode.isUsed = true;
+      accessCode.studentId = savedStudent.id;
+      await manager.save(accessCode);
+
+      return savedStudent;
+    });
+
+    const profile = await this.userService.findByIdWithRole(user.id);
+    return this.userService.sanitizeUser(profile!);
+  }
+
+  async login(dto: StudentSignInDto) {
+    const user = await this.userService.findStudentByIdentifier(dto.identifier);
+
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const isValid = await this.validateStudentCredential(user, dto.credential);
+
+    if (!isValid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    return user;
+  }
+
+  async getProfile(userId: string) {
+    const user = await this.userService.findByIdWithRole(userId);
+
+    if (!user) {
+      throw new NotFoundException('Student not found');
+    }
+
+    return this.userService.sanitizeUser(user);
+  }
+
+  async findAllStudents(
+    query: PaginationQueryDto,
+  ): Promise<PaginatedResult<ReturnType<UserService['sanitizeUser']>>> {
+    const skip = getPaginationSkip(query.page, query.limit);
+
+    const qb = this.usersRepository
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.role', 'role')
+      .leftJoinAndSelect('user.partner', 'partner')
+      .where('role.name = :roleName', { roleName: RoleName.STUDENT });
+
+    if (query.search) {
+      qb.andWhere(
+        '(user.firstName LIKE :search OR user.lastName LIKE :search OR user.email LIKE :search OR user.phone LIKE :search)',
+        { search: `%${query.search}%` },
+      );
+    }
+
+    qb.orderBy('user.createdAt', query.sortOrder ?? SortOrder.DESC)
+      .skip(skip)
+      .take(query.limit);
+
+    const [items, total] = await qb.getManyAndCount();
+    return buildPaginatedResult(
+      items.map((user) => this.userService.sanitizeUser(user)),
+      total,
+      query,
+    );
+  }
+
+  async findStudentsForPartner(
+    partnerId: string,
+    query: PaginationQueryDto,
+  ): Promise<PaginatedResult<ReturnType<UserService['sanitizeUser']>>> {
+    const skip = getPaginationSkip(query.page, query.limit);
+
+    const qb = this.usersRepository
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.role', 'role')
+      .where('role.name = :roleName', { roleName: RoleName.STUDENT })
+      .andWhere('user.partnerId = :partnerId', { partnerId });
+
+    if (query.search) {
+      qb.andWhere(
+        '(user.firstName LIKE :search OR user.lastName LIKE :search OR user.email LIKE :search OR user.phone LIKE :search)',
+        { search: `%${query.search}%` },
+      );
+    }
+
+    qb.orderBy('user.createdAt', query.sortOrder ?? SortOrder.DESC)
+      .skip(skip)
+      .take(query.limit);
+
+    const [items, total] = await qb.getManyAndCount();
+    return buildPaginatedResult(
+      items.map((user) => this.userService.sanitizeUser(user)),
+      total,
+      query,
+    );
+  }
+
+  private async validateStudentCredential(
+    user: User,
+    credential: string,
+  ): Promise<boolean> {
+    if (user.password) {
+      return bcrypt.compare(credential, user.password);
+    }
+
+    if (!user.accessCodeId) {
+      return false;
+    }
+
+    const accessCode = await this.accessCodesRepository.findOneBy({
+      id: user.accessCodeId,
+    });
+
+    return accessCode?.code === credential.toUpperCase();
+  }
+
+  private splitFullName(fullName: string): {
+    firstName: string;
+    lastName: string;
+  } {
+    const trimmed = fullName.trim();
+    const spaceIndex = trimmed.indexOf(' ');
+
+    if (spaceIndex === -1) {
+      return { firstName: trimmed, lastName: trimmed };
+    }
+
+    return {
+      firstName: trimmed.slice(0, spaceIndex),
+      lastName: trimmed.slice(spaceIndex + 1).trim() || trimmed.slice(0, spaceIndex),
+    };
+  }
+}

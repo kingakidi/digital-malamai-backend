@@ -1,0 +1,84 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { CurrentUser } from '../common/abac/decorators/current-user.decorator';
+import { RequirePermission } from '../common/abac/decorators/require-permission.decorator';
+import { RequireRole } from '../common/abac/decorators/require-role.decorator';
+import { JwtAuthGuard } from '../common/abac/guards/jwt-auth.guard';
+import { PermissionGuard } from '../common/abac/guards/permission.guard';
+import { RoleGuard } from '../common/abac/guards/role.guard';
+import { ResponseMessage } from '../common/decorators/response-message.decorator';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
+import {
+  PermissionAction,
+  PermissionResource,
+  RoleName,
+} from '../common/types/permission.types';
+import {
+  ApiCreatedData,
+  ApiOkData,
+  ApiOkPaginated,
+  AccessCodeResponseDto,
+  AccessCodeStatsResponseDto,
+} from '../common/swagger';
+import { GenerateAccessCodesDto } from './dto/generate-access-codes.dto';
+import { AccessCodesService } from './access-codes.service';
+
+@ApiTags('partners/access-codes')
+@ApiBearerAuth()
+@RequireRole(RoleName.PARTNER)
+@UseGuards(JwtAuthGuard, RoleGuard, PermissionGuard)
+@Controller('partners/access-codes')
+export class PartnerAccessCodesController {
+  constructor(private readonly accessCodesService: AccessCodesService) {}
+
+  @Get()
+  @ApiOkPaginated(AccessCodeResponseDto)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.READ)
+  @ResponseMessage('Access codes retrieved successfully')
+  findOwn(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: PaginationQueryDto,
+  ) {
+    return this.accessCodesService.findForPartner(user.partnerId!, query);
+  }
+
+  @Get('stats')
+  @ApiOkData(AccessCodeStatsResponseDto)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.READ)
+  @ResponseMessage('Access code stats retrieved successfully')
+  getStats(@CurrentUser() user: AuthenticatedUser) {
+    return this.accessCodesService.getStatsForPartner(user.partnerId!);
+  }
+}
+
+@ApiTags('admin/access-codes')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, PermissionGuard, RoleGuard)
+@Controller('admin/partners')
+export class AdminAccessCodesController {
+  constructor(private readonly accessCodesService: AccessCodesService) {}
+
+  @Post(':partnerId/access-codes')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiCreatedData(AccessCodeResponseDto, { isArray: true })
+  @RequireRole(RoleName.SUPERADMIN)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.CREATE)
+  @ResponseMessage('Access codes generated successfully')
+  generate(
+    @Param('partnerId') partnerId: string,
+    @Body() dto: GenerateAccessCodesDto,
+  ) {
+    return this.accessCodesService.generateForPartner(partnerId, dto);
+  }
+}

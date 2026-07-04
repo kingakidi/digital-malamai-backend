@@ -5,19 +5,22 @@ import {
   Entity,
   JoinColumn,
   ManyToOne,
-  OneToMany,
   PrimaryGeneratedColumn,
   Unique,
   UpdateDateColumn,
 } from 'typeorm';
 import * as bcrypt from 'bcrypt';
+import { OnboardingStatus } from '../../common/types/onboarding-status.type';
+import { AccessCode } from '../../access-codes/entities/access-code.entity';
+import { Partner } from '../../partners/entities/partner.entity';
 import { Role } from '../../roles/entities/role.entity';
 
 @Entity('users')
 @Unique(['email'])
+@Unique(['phone'])
 export class User {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
   @Column()
   firstName: string;
@@ -28,24 +31,44 @@ export class User {
   @Column()
   email: string;
 
+  @Column({ type: 'varchar', nullable: true })
+  phone: string | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  emailVerifiedAt: Date | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  phoneVerifiedAt: Date | null;
+
+  @Column({
+    type: 'enum',
+    enum: OnboardingStatus,
+    nullable: true,
+  })
+  onboardingStatus: OnboardingStatus | null;
+
   @Column({ default: true })
   isActive: boolean;
 
-  @Column()
-  password: string;
+  @Column({ type: 'varchar', nullable: true })
+  password: string | null;
 
   @ManyToOne(() => Role, (role) => role.users, { nullable: false, eager: true })
   role: Role;
 
-  @Column({ nullable: true })
-  partnerId: number | null;
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  partnerId: string | null;
 
-  @ManyToOne(() => User, (user) => user.linkedUsers, { nullable: true })
+  @ManyToOne(() => Partner, (partner) => partner.users, { nullable: true })
   @JoinColumn({ name: 'partnerId' })
-  partner: User | null;
+  partner: Partner | null;
 
-  @OneToMany(() => User, (user) => user.partner)
-  linkedUsers: User[];
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  accessCodeId: string | null;
+
+  @ManyToOne(() => AccessCode, { nullable: true })
+  @JoinColumn({ name: 'accessCodeId' })
+  accessCode: AccessCode | null;
 
   @CreateDateColumn()
   createdAt: Date;
@@ -55,6 +78,8 @@ export class User {
 
   @BeforeInsert()
   async hashPassword(): Promise<void> {
-    this.password = await bcrypt.hash(this.password, 10);
+    if (this.password) {
+      this.password = await bcrypt.hash(this.password, 10);
+    }
   }
 }

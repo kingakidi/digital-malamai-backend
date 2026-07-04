@@ -3,6 +3,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PermissionGuard } from '../common/abac/guards/permission.guard';
 import { JwtAuthGuard } from '../common/abac/guards/jwt-auth.guard';
+import { OtpsModule } from '../otps/otps.module';
+import { StudentsModule } from '../students/students.module';
 import { UserModule } from '../user/user.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -10,6 +12,8 @@ import { AuthService } from './auth.service';
 @Module({
   imports: [
     forwardRef(() => UserModule),
+    forwardRef(() => StudentsModule),
+    OtpsModule,
     JwtModule.registerAsync({
       global: true,
       imports: [ConfigModule],
@@ -25,6 +29,11 @@ import { AuthService } from './auth.service';
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtAuthGuard, PermissionGuard],
-  exports: [AuthService, JwtAuthGuard, PermissionGuard],
+  exports: [
+    AuthService,
+    JwtAuthGuard,
+    PermissionGuard,
+    forwardRef(() => UserModule),
+  ],
 })
 export class AuthModule {}

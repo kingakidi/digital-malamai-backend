@@ -36,15 +36,23 @@ export class PermissionGuard implements CanActivate {
       throw new ForbiddenException('Authentication required');
     }
 
-    const allowed = this.abacService.can(
+    const scope = this.abacService.resolveScope(
       user,
       required.resource,
       required.action,
     );
 
-    if (!allowed) {
+    if (!scope) {
       throw new ForbiddenException(
         `Insufficient permissions for ${required.action} on ${required.resource}`,
+      );
+    }
+
+    if (
+      !this.abacService.satisfiesScopeContext(user, scope, required.resource)
+    ) {
+      throw new ForbiddenException(
+        'Partner profile is not linked to this account',
       );
     }
 

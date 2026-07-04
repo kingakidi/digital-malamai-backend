@@ -1,14 +1,13 @@
-import { AbacPermission } from './abac-permission.interface';
-
 export interface AuthenticatedUser {
-  id: number;
+  id: string;
   email: string;
   firstName: string;
   lastName: string;
+  partnerId: string | null;
   role: {
-    id: number;
+    id: string;
     name: string;
     title: string;
-    permissions: AbacPermission[];
+    permissions: import('./abac-permission.interface').AbacPermission[];
   };
 }

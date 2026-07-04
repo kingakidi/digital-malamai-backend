@@ -7,7 +7,8 @@ import {
 } from '../types/permission.types';
 
 export interface AbacSubject {
-  id: number;
+  id: string;
+  partnerId?: string | null;
   role: {
     name: string;
     permissions: AbacPermission[];
@@ -21,7 +22,13 @@ export class AbacService {
     resource: PermissionResource,
     action: PermissionAction,
   ): boolean {
-    return this.resolveScope(subject, resource, action) !== null;
+    const scope = this.resolveScope(subject, resource, action);
+
+    if (!scope) {
+      return false;
+    }
+
+    return this.satisfiesScopeContext(subject, scope, resource);
   }
 
   resolveScope(
@@ -44,6 +51,24 @@ export class AbacService {
     }
 
     return null;
+  }
+
+  satisfiesScopeContext(
+    subject: AbacSubject,
+    scope: PermissionScope,
+    resource: PermissionResource,
+  ): boolean {
+    switch (scope) {
+      case PermissionScope.LINKED:
+        return Boolean(subject.partnerId);
+      case PermissionScope.OWN:
+        if (resource === PermissionResource.PARTNERS) {
+          return Boolean(subject.partnerId);
+        }
+        return true;
+      default:
+        return true;
+    }
   }
 
   private matchesResource(
