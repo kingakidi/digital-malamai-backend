@@ -12,6 +12,7 @@ import superadminConfig from './config/superadmin.config';
 import databaseConfig from './config/database.config';
 import { validateEnvironment } from './config/env.validation';
 import flutterwaveConfig from './config/flutterwave.config';
+import mediaConfig from './media/media.config';
 import messagingConfig from './config/messaging.config';
 import otpConfig from './config/otp.config';
 import smtpConfig from './config/smtp.config';
@@ -19,6 +20,7 @@ import jwtConfig from './config/jwt.config';
 import { AuthModule } from './auth/auth.module';
 import { CoursesModule } from './courses/courses.module';
 import { MailModule } from './mail/mail.module';
+import { MediaModule } from './media/media.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { OtpsModule } from './otps/otps.module';
 import { PartnersModule } from './partners/partners.module';
@@ -66,6 +68,7 @@ import { WelcomeModule } from './welcome/welcome.module';
     UserModule,
     AuthModule,
     MailModule,
+    MediaModule,
     NotificationsModule,
     OtpsModule,
     PartnersModule,

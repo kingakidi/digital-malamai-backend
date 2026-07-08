@@ -65,6 +65,7 @@ async function bootstrap() {
     .addTag('admin/reports')
     .addTag('partners/portal')
     .addTag('auth/otp')
+    .addTag('media')
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);

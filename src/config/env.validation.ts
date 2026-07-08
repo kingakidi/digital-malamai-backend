@@ -45,6 +45,13 @@ const ENV_RULES: EnvRule[] = [
   { key: 'SUPER_ADMIN_PASSWORD', required: true, nonEmpty: true },
   { key: 'SUPER_ADMIN_FIRST_NAME', required: true, nonEmpty: true },
   { key: 'SUPER_ADMIN_LAST_NAME', required: true, nonEmpty: true },
+  { key: 'S3_ACCESS_KEY_ID' },
+  { key: 'S3_SECRET_ACCESS_KEY' },
+  { key: 'S3_REGION' },
+  { key: 'S3_BUCKET_NAME' },
+  { key: 'S3_ENDPOINT' },
+  { key: 'S3_PUBLIC_BASE_URL' },
+  { key: 'S3_FORCE_PATH_STYLE' },
 ];
 
 export function validateEnvironment(
@@ -108,6 +115,19 @@ export function validateEnvironment(
         `CORS_ORIGINS entry "${origin}" must be a full origin (e.g. http://127.0.0.1:5500)`,
       );
     }
+  }
+
+  const s3ForcePathStyle = String(config.S3_FORCE_PATH_STYLE ?? '')
+    .trim()
+    .toLowerCase();
+
+  if (
+    s3ForcePathStyle &&
+    !['true', 'false', '1', '0', 'yes', 'no', 'on', 'off'].includes(
+      s3ForcePathStyle,
+    )
+  ) {
+    errors.push('S3_FORCE_PATH_STYLE must be true or false');
   }
 
   if (errors.length > 0) {

@@ -27,6 +27,7 @@ import { Partner } from './entities/partner.entity';
 import { PublicPartnerView } from './types/public-partner-view.type';
 import { toPublicPartner } from './utils/partner-view.util';
 import { AccountWelcomeService } from '../mail/account-welcome.service';
+import { S3Service } from '../media/s3.service';
 
 const ALLOWED_SORT_FIELDS = [
   'id',
@@ -46,6 +47,7 @@ export class PartnersService {
     private readonly rolesService: RolesService,
     private readonly userService: UserService,
     private readonly accountWelcomeService: AccountWelcomeService,
+    private readonly s3Service: S3Service,
   ) {}
 
   async create(createPartnerDto: CreatePartnerDto): Promise<Partner> {
@@ -237,6 +239,7 @@ export class PartnersService {
 
   async update(id: string, updatePartnerDto: UpdatePartnerDto): Promise<Partner> {
     const partner = await this.findOneEntity(id);
+    const previousLogoUrl = partner.logoUrl;
 
     if (updatePartnerDto.email !== undefined) {
       const normalizedEmail = updatePartnerDto.email.trim().toLowerCase();
@@ -248,7 +251,32 @@ export class PartnersService {
     const { email: _email, ...rest } = updatePartnerDto;
     Object.assign(partner, rest);
 
-    return this.partnersRepository.save(partner);
+    const savedPartner = await this.partnersRepository.save(partner);
+
+    if (
+      updatePartnerDto.logoUrl !== undefined &&
+      updatePartnerDto.logoUrl !== previousLogoUrl
+    ) {
+      await this.deletePartnerLogoFromS3(previousLogoUrl);
+    }
+
+    return savedPartner;
+  }
+
+  private async deletePartnerLogoFromS3(
+    logoUrl: string | null | undefined,
+  ): Promise<void> {
+    if (!logoUrl) {
+      return;
+    }
+
+    const key =
+      this.s3Service.extractKeyFromUrl(logoUrl) ??
+      (this.s3Service.isLikelyS3Key(logoUrl) ? logoUrl : null);
+
+    if (key) {
+      await this.s3Service.delete(key);
+    }
   }
 
   async assertPartnerEmailAvailable(
