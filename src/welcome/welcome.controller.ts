@@ -8,6 +8,11 @@ import { WelcomeService } from './welcome.service';
 export class ApiWelcomeController {
   constructor(private readonly welcomeService: WelcomeService) {}
 
+  @Get('health')
+  health(): { status: string } {
+    return { status: 'ok' };
+  }
+
   @Get()
   welcomeApi(@Res() res: Response): void {
     res.type('text/plain').send(this.welcomeService.getText());

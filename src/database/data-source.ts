@@ -1,3 +1,4 @@
+import { join } from 'path';
 import 'reflect-metadata';
 import { config } from 'dotenv';
 import { DataSource } from 'typeorm';
@@ -37,6 +38,6 @@ export default new DataSource({
     PaymentTransaction,
     PaymentWebhookEvent,
   ],
-  migrations: ['src/database/migrations/*.ts'],
+  migrations: [join(__dirname, 'migrations', '*.{ts,js}')],
   synchronize: false,
 });

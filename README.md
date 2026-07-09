@@ -31,6 +31,7 @@ Superadmin is seeded on startup from `SUPER_ADMIN_*` env vars.
 | `npm run start:prod` | Production server |
 | `npm run migration:generate` | Generate migration from entity diff |
 | `npm run migration:run` | Apply pending migrations |
+| `npm run migration:run:prod` | Apply migrations from compiled `dist/` (Docker) |
 | `npm run migration:revert` | Revert last migration |
 | `npm run migration:show` | List migration status |
 
@@ -69,6 +70,44 @@ npm run migration:generate
 Review the file under `src/database/migrations/`, then commit it.
 
 If your local DB was created with `synchronize`, you do not need to run the initial migration locally. For new production deploys, run `migration:run` on an empty database.
+
+---
+
+## Docker
+
+Single-stage image (Node 22 Alpine) with entrypoint: wait for DB → optional migrations → start API. Pass all config via `docker run -e` or `--env-file`.
+
+```bash
+docker build -t digital-malamai-api .
+
+docker run --rm -p 3001:3001 \
+  -e PORT=3001 \
+  -e NODE_ENV=production \
+  -e API_PREFIX=api/v1 \
+  -e SWAGGER_PATH=api-docs \
+  -e DB_HOST=your-db-host \
+  -e DB_PORT=3306 \
+  -e DB_USERNAME=your-user \
+  -e DB_PASSWORD=your-password \
+  -e DB_DATABASE=digital_malamai \
+  -e DB_SYNCHRONIZE=false \
+  -e DB_MIGRATIONS_RUN=true \
+  -e JWT_SECRET=your-secret \
+  -e JWT_EXPIRES_IN=7d \
+  -e CORS_ORIGINS=http://localhost:3000 \
+  -e SUPER_ADMIN_EMAIL=admin@example.com \
+  -e SUPER_ADMIN_PASSWORD=ChangeMe123! \
+  # ... see .env for full list (SMTP, OTP, Flutterwave, etc.)
+  digital-malamai-api
+```
+
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | `npm ci` → build → prune dev deps |
+| `docker-entrypoint.sh` | DB wait → `migration:run:prod` (if `DB_MIGRATIONS_RUN=true`) → `node dist/main.js` |
+| `.dockerignore` | Excludes `node_modules`, `.env`, tests |
+
+**Health check:** `GET /api/v1/health`
 
 ---
 
