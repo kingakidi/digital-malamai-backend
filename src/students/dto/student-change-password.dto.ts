@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { IsEnum, IsString, Length, Matches, MinLength } from 'class-validator';
 import { OtpChannel } from '../../common/types/otp.types';
 
-export class ChangePasswordDto {
+export class StudentChangePasswordDto {
   @ApiProperty({ enum: OtpChannel, example: OtpChannel.EMAIL })
   @IsEnum(OtpChannel)
   type: OtpChannel;

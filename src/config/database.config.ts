@@ -6,5 +6,6 @@ export default registerAs('database', () => ({
   username: process.env.DB_USERNAME ?? 'root',
   password: process.env.DB_PASSWORD ?? '',
   database: process.env.DB_DATABASE ?? 'digital_malamai',
-  synchronize: process.env.NODE_ENV !== 'production',
+  synchronize: process.env.DB_SYNCHRONIZE === 'true',
+  migrationsRun: process.env.DB_MIGRATIONS_RUN === 'true',
 }));

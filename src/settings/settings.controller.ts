@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Put, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RequireRole } from '../common/abac/decorators/require-role.decorator';
 import { JwtAuthGuard } from '../common/abac/guards/jwt-auth.guard';
@@ -37,7 +37,7 @@ export class AdminSettingsController {
     return this.settingsService.getOnboardingFee();
   }
 
-  @Patch('onboarding-fee')
+  @Put('onboarding-fee')
   @ApiOkData(SystemSettingResponseDto)
   @ResponseMessage('Onboarding fee updated successfully')
   updateOnboardingFee(@Body() dto: UpdateOnboardingFeeDto) {

@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { ReportFilterQueryDto } from '../common/dto/report-filter-query.dto';
 import { PaginatedResult } from '../common/interfaces/pagination.interface';
 import { OnboardingStatus } from '../common/types/onboarding-status.type';
 import { CourseStatus, PaidFor, PaymentStatus } from '../common/types/payment.types';
@@ -401,39 +402,72 @@ export class CoursesService {
   // ─── Admin / partner reports ─────────────────────────────────────────────
 
   async findAllEnrollments(
-    query: PaginationQueryDto,
+    query: ReportFilterQueryDto,
   ): Promise<PaginatedResult<CourseEnrollment>> {
     const skip = getPaginationSkip(query.page, query.limit);
-
-    const qb = this.enrollmentsRepository
-      .createQueryBuilder('enrollment')
-      .leftJoinAndSelect('enrollment.user', 'user')
-      .leftJoinAndSelect('enrollment.course', 'course')
-      .orderBy('enrollment.enrolledAt', query.sortOrder ?? SortOrder.DESC)
-      .skip(skip)
-      .take(query.limit);
-
+    const qb = this.buildEnrollmentsQuery(query);
+    qb.skip(skip).take(query.limit);
     const [items, total] = await qb.getManyAndCount();
     return buildPaginatedResult(items, total, query);
   }
 
+  async findEnrollmentById(
+    id: string,
+    scopedPartnerId?: string,
+  ): Promise<CourseEnrollment> {
+    const enrollment = await this.enrollmentsRepository.findOne({
+      where: { id },
+      relations: ['user', 'course', 'paymentTransaction'],
+    });
+
+    if (!enrollment) {
+      throw new NotFoundException(`Enrollment ${id} not found`);
+    }
+
+    if (
+      scopedPartnerId &&
+      enrollment.course?.partnerId !== scopedPartnerId
+    ) {
+      throw new NotFoundException(`Enrollment ${id} not found`);
+    }
+
+    return enrollment;
+  }
+
   async findEnrollmentsForPartner(
     partnerId: string,
-    query: PaginationQueryDto,
+    query: ReportFilterQueryDto,
   ): Promise<PaginatedResult<CourseEnrollment>> {
     const skip = getPaginationSkip(query.page, query.limit);
-
-    const qb = this.enrollmentsRepository
-      .createQueryBuilder('enrollment')
-      .leftJoinAndSelect('enrollment.user', 'user')
-      .leftJoinAndSelect('enrollment.course', 'course')
-      .where('course.partnerId = :partnerId', { partnerId })
-      .orderBy('enrollment.enrolledAt', query.sortOrder ?? SortOrder.DESC)
-      .skip(skip)
-      .take(query.limit);
-
+    const qb = this.buildEnrollmentsQuery(query, partnerId);
+    qb.skip(skip).take(query.limit);
     const [items, total] = await qb.getManyAndCount();
     return buildPaginatedResult(items, total, query);
+  }
+
+  async findCourseBySlugForPartner(
+    partnerId: string,
+    slug: string,
+  ): Promise<Course> {
+    const course = await this.coursesRepository.findOne({
+      where: { slug, partnerId },
+    });
+
+    if (!course) {
+      throw new NotFoundException(`Course with slug "${slug}" not found`);
+    }
+
+    return course;
+  }
+
+  async findCourseBySlugForStaff(slug: string): Promise<Course> {
+    const course = await this.coursesRepository.findOne({ where: { slug } });
+
+    if (!course) {
+      throw new NotFoundException(`Course with slug "${slug}" not found`);
+    }
+
+    return course;
   }
 
   async getPartnerRevenueSummary(partnerId: string) {
@@ -472,17 +506,70 @@ export class CoursesService {
   }
 
   async findOnboardingPayments(
-    query: PaginationQueryDto,
+    query: ReportFilterQueryDto,
     partnerId?: string,
   ): Promise<PaginatedResult<PaymentTransaction>> {
     return this.findPaymentsByType(PaidFor.ONBOARDING, query, partnerId);
   }
 
   async findCoursePayments(
-    query: PaginationQueryDto,
+    query: ReportFilterQueryDto,
     partnerId?: string,
   ): Promise<PaginatedResult<PaymentTransaction>> {
     return this.findPaymentsByType(PaidFor.COURSE, query, partnerId);
+  }
+
+  async findAdminPayments(
+    query: ReportFilterQueryDto,
+  ): Promise<PaginatedResult<PaymentTransaction>> {
+    const skip = getPaginationSkip(query.page, query.limit);
+
+    const qb = this.transactionsRepository
+      .createQueryBuilder('tx')
+      .leftJoinAndSelect('tx.user', 'user')
+      .leftJoinAndSelect('tx.partner', 'partner')
+      .leftJoinAndSelect('tx.course', 'course')
+      .orderBy('tx.createdAt', query.sortOrder ?? SortOrder.DESC)
+      .skip(skip)
+      .take(query.limit);
+
+    if (query.paidFor) {
+      qb.andWhere('tx.paidFor = :paidFor', { paidFor: query.paidFor });
+    }
+
+    if (query.paymentStatus) {
+      qb.andWhere('tx.status = :paymentStatus', {
+        paymentStatus: query.paymentStatus,
+      });
+    }
+
+    if (query.partnerId) {
+      qb.andWhere('tx.partnerId = :partnerId', { partnerId: query.partnerId });
+    }
+
+    if (query.courseId) {
+      qb.andWhere('tx.courseId = :courseId', { courseId: query.courseId });
+    }
+
+    if (query.dateFrom) {
+      qb.andWhere('tx.createdAt >= :dateFrom', { dateFrom: query.dateFrom });
+    }
+
+    if (query.dateTo) {
+      qb.andWhere('tx.createdAt <= :dateTo', {
+        dateTo: `${query.dateTo} 23:59:59`,
+      });
+    }
+
+    if (query.search) {
+      qb.andWhere(
+        '(tx.txRef LIKE :search OR tx.externalTransactionId LIKE :search OR user.email LIKE :search OR user.firstName LIKE :search OR user.lastName LIKE :search OR course.title LIKE :search)',
+        { search: `%${query.search}%` },
+      );
+    }
+
+    const [items, total] = await qb.getManyAndCount();
+    return buildPaginatedResult(items, total, query);
   }
 
   // ─── Serialization helpers ───────────────────────────────────────────────
@@ -568,9 +655,60 @@ export class CoursesService {
     return video;
   }
 
+  private buildEnrollmentsQuery(
+    query: ReportFilterQueryDto,
+    scopedPartnerId?: string,
+  ) {
+    const qb = this.enrollmentsRepository
+      .createQueryBuilder('enrollment')
+      .leftJoinAndSelect('enrollment.user', 'user')
+      .leftJoinAndSelect('enrollment.course', 'course');
+
+    const partnerId = scopedPartnerId ?? query.partnerId;
+    if (partnerId) {
+      qb.andWhere('course.partnerId = :partnerId', { partnerId });
+    }
+
+    if (query.courseId) {
+      qb.andWhere('enrollment.courseId = :courseId', {
+        courseId: query.courseId,
+      });
+    }
+
+    if (query.studentId) {
+      qb.andWhere('enrollment.userId = :studentId', {
+        studentId: query.studentId,
+      });
+    }
+
+    if (query.dateFrom) {
+      qb.andWhere('enrollment.enrolledAt >= :dateFrom', {
+        dateFrom: query.dateFrom,
+      });
+    }
+
+    if (query.dateTo) {
+      qb.andWhere('enrollment.enrolledAt <= :dateTo', {
+        dateTo: `${query.dateTo} 23:59:59`,
+      });
+    }
+
+    if (query.search) {
+      qb.andWhere(
+        '(course.title LIKE :search OR user.firstName LIKE :search OR user.lastName LIKE :search OR user.email LIKE :search)',
+        { search: `%${query.search}%` },
+      );
+    }
+
+    return qb.orderBy(
+      'enrollment.enrolledAt',
+      query.sortOrder ?? SortOrder.DESC,
+    );
+  }
+
   private async findPaymentsByType(
     paidFor: PaidFor,
-    query: PaginationQueryDto,
+    query: ReportFilterQueryDto,
     partnerId?: string,
   ): Promise<PaginatedResult<PaymentTransaction>> {
     const skip = getPaginationSkip(query.page, query.limit);
@@ -586,8 +724,30 @@ export class CoursesService {
       .skip(skip)
       .take(query.limit);
 
-    if (partnerId) {
-      qb.andWhere('tx.partnerId = :partnerId', { partnerId });
+    const effectivePartnerId = partnerId ?? query.partnerId;
+    if (effectivePartnerId) {
+      qb.andWhere('tx.partnerId = :partnerId', { partnerId: effectivePartnerId });
+    }
+
+    if (query.courseId) {
+      qb.andWhere('tx.courseId = :courseId', { courseId: query.courseId });
+    }
+
+    if (query.dateFrom) {
+      qb.andWhere('tx.createdAt >= :dateFrom', { dateFrom: query.dateFrom });
+    }
+
+    if (query.dateTo) {
+      qb.andWhere('tx.createdAt <= :dateTo', {
+        dateTo: `${query.dateTo} 23:59:59`,
+      });
+    }
+
+    if (query.search) {
+      qb.andWhere(
+        '(tx.txRef LIKE :search OR user.email LIKE :search OR user.firstName LIKE :search OR user.lastName LIKE :search OR course.title LIKE :search)',
+        { search: `%${query.search}%` },
+      );
     }
 
     const [items, total] = await qb.getManyAndCount();

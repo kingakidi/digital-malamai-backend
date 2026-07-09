@@ -1,5 +1,6 @@
 import { ApiPropertyOptional, PartialType, OmitType } from '@nestjs/swagger';
-import { IsBoolean, IsOptional } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional } from 'class-validator';
+import { AccountStatus } from '../../common/types/account-status.type';
 import { CreateUserDto } from './create-user.dto';
 
 export class AdminPatchUserDto extends PartialType(
@@ -9,4 +10,9 @@ export class AdminPatchUserDto extends PartialType(
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({ enum: AccountStatus })
+  @IsOptional()
+  @IsEnum(AccountStatus)
+  accountStatus?: AccountStatus;
 }

@@ -38,12 +38,12 @@ export class PaymentTransaction {
   @Column({ type: 'enum', enum: PaidFor })
   paidFor: PaidFor;
 
-  @Column()
-  userId: string;
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  userId: string | null;
 
-  @ManyToOne(() => User, { nullable: false })
+  @ManyToOne(() => User, { nullable: true })
   @JoinColumn({ name: 'userId' })
-  user: User;
+  user: User | null;
 
   @Column({ type: 'varchar', length: 36, nullable: true })
   partnerId: string | null;

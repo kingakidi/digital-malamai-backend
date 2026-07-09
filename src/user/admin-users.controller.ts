@@ -7,7 +7,7 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
-  Patch,
+  Put,
   Post,
   Query,
   UseGuards,
@@ -71,7 +71,7 @@ export class AdminUsersController {
     return this.userService.resendStaffWelcomeEmail(id);
   }
 
-  @Patch(':id')
+  @Put(':id')
   @ApiOkData(UserResponseDto)
   @ResponseMessage('Staff account updated successfully')
   patchStaff(

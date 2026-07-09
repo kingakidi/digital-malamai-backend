@@ -10,7 +10,7 @@ export function buildPaginatedResult<T>(
   total: number,
   pagination: PaginationInput,
 ): PaginatedResult<T> {
-  const totalPages = total === 0 ? 0 : Math.ceil(total / pagination.limit);
+  const totalPages = total === 0 ? 1 : Math.ceil(total / pagination.limit);
 
   return {
     data,

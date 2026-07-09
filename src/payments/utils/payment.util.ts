@@ -25,6 +25,20 @@ export function parsePaymentMetadata(
   return meta as PaymentMetadata;
 }
 
+export function tryResolvePaidFor(value?: string): PaidFor | null {
+  const normalized = value?.toLowerCase();
+
+  if (normalized === PaidFor.COURSE) {
+    return PaidFor.COURSE;
+  }
+
+  if (normalized === PaidFor.ONBOARDING) {
+    return PaidFor.ONBOARDING;
+  }
+
+  return null;
+}
+
 export function normalizePaidFor(
   value?: string,
   fallback?: PaidFor,

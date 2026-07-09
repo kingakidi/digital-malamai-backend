@@ -26,6 +26,11 @@ import {
   getPaginationSkip,
 } from '../common/utils/pagination.util';
 import { STAFF_ACCOUNT_ROLES } from '../common/constants/staff-roles.constants';
+import { AccountStatus } from '../common/types/account-status.type';
+import {
+  registrationBlockMessage,
+  syncAccountActiveFlag,
+} from '../common/utils/account-access.util';
 import { AccountWelcomeService } from '../mail/account-welcome.service';
 import { RolesService } from '../roles/roles.service';
 import { AdminPatchUserDto } from './dto/admin-patch-user.dto';
@@ -185,6 +190,158 @@ export class UserService {
     return { message: 'Password changed successfully' };
   }
 
+  async updateOwnProfile(
+    userId: string,
+    dto: { firstName: string; lastName: string },
+  ) {
+    const user = await this.findByIdWithRole(userId);
+
+    if (!user) {
+      throw new NotFoundException(`User ${userId} not found`);
+    }
+
+    user.firstName = dto.firstName.trim();
+    user.lastName = dto.lastName.trim();
+    await this.usersRepository.save(user);
+
+    return this.findByIdWithRole(userId);
+  }
+
+  async countPartnerRoleUsers(partnerId: string): Promise<number> {
+    return this.usersRepository
+      .createQueryBuilder('user')
+      .innerJoin('user.role', 'role')
+      .where('user.partnerId = :partnerId', { partnerId })
+      .andWhere('role.name = :roleName', { roleName: RoleName.PARTNER })
+      .getCount();
+  }
+
+  async listPartnerTeamUsers(partnerId: string) {
+    const users = await this.usersRepository
+      .createQueryBuilder('user')
+      .innerJoinAndSelect('user.role', 'role')
+      .where('user.partnerId = :partnerId', { partnerId })
+      .andWhere('role.name = :roleName', { roleName: RoleName.PARTNER })
+      .orderBy('user.createdAt', 'ASC')
+      .getMany();
+
+    return users.slice(1).map((user) => this.toPartnerTeamUser(user, partnerId));
+  }
+
+  async createPartnerTeamUser(
+    partnerId: string,
+    dto: {
+      firstName: string;
+      lastName: string;
+      email: string;
+      password: string;
+    },
+  ) {
+    const count = await this.countPartnerRoleUsers(partnerId);
+
+    if (count >= 6) {
+      throw new BadRequestException(
+        'Maximum of 5 additional team users reached for this partner',
+      );
+    }
+
+    const partnerRole = await this.rolesService.findByName(RoleName.PARTNER);
+
+    if (!partnerRole) {
+      throw new NotFoundException('Partner role is not configured');
+    }
+
+    const normalizedEmail = dto.email.trim().toLowerCase();
+    await this.assertEmailAvailable(normalizedEmail);
+
+    const user = this.usersRepository.create({
+      firstName: dto.firstName.trim(),
+      lastName: dto.lastName.trim(),
+      email: normalizedEmail,
+      password: dto.password,
+      mustChangePassword: true,
+      role: partnerRole,
+      partnerId,
+    });
+
+    const saved = await this.usersRepository.save(user);
+    return this.toPartnerTeamUser(saved, partnerId);
+  }
+
+  async updatePartnerTeamUser(
+    partnerId: string,
+    userId: string,
+    dto: {
+      firstName?: string;
+      lastName?: string;
+      isActive?: boolean;
+      accountStatus?: AccountStatus;
+    },
+  ) {
+    const user = await this.findPartnerTeamUser(partnerId, userId);
+
+    if (dto.firstName !== undefined) {
+      user.firstName = dto.firstName.trim();
+    }
+    if (dto.lastName !== undefined) {
+      user.lastName = dto.lastName.trim();
+    }
+    if (dto.isActive !== undefined) {
+      user.isActive = dto.isActive;
+      if (dto.accountStatus === undefined) {
+        user.accountStatus = dto.isActive
+          ? AccountStatus.ACTIVE
+          : AccountStatus.DISABLED;
+      }
+    }
+    if (dto.accountStatus !== undefined) {
+      user.accountStatus = dto.accountStatus;
+      user.isActive = syncAccountActiveFlag(dto.accountStatus);
+    }
+
+    const saved = await this.usersRepository.save(user);
+    return this.toPartnerTeamUser(saved, partnerId);
+  }
+
+  async removePartnerTeamUser(partnerId: string, userId: string) {
+    const user = await this.findPartnerTeamUser(partnerId, userId);
+    user.accountStatus = AccountStatus.DISABLED;
+    user.isActive = false;
+    await this.usersRepository.save(user);
+    return { message: 'Team member disabled successfully' };
+  }
+
+  private async findPartnerTeamUser(partnerId: string, userId: string) {
+    const users = await this.usersRepository
+      .createQueryBuilder('user')
+      .innerJoinAndSelect('user.role', 'role')
+      .where('user.partnerId = :partnerId', { partnerId })
+      .andWhere('role.name = :roleName', { roleName: RoleName.PARTNER })
+      .orderBy('user.createdAt', 'ASC')
+      .getMany();
+
+    const primaryId = users[0]?.id;
+    const user = users.find((item) => item.id === userId);
+
+    if (!user || user.id === primaryId) {
+      throw new NotFoundException('Team member not found');
+    }
+
+    return user;
+  }
+
+  private toPartnerTeamUser(user: User, partnerId: string) {
+    return {
+      id: user.id,
+      partnerId,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      isActive: user.isActive,
+      createdAt: user.createdAt,
+    };
+  }
+
   async createSuperadminSeedUser(dto: {
     firstName: string;
     lastName: string;
@@ -217,7 +374,18 @@ export class UserService {
     const existing = await this.findByEmail(email);
 
     if (existing && existing.id !== excludeUserId) {
-      throw new ConflictException('Email already exists');
+      throw new ConflictException(registrationBlockMessage(existing, 'email'));
+    }
+  }
+
+  async assertPhoneAvailable(
+    phone: string,
+    excludeUserId?: string,
+  ): Promise<void> {
+    const existing = await this.findByPhone(phone);
+
+    if (existing && existing.id !== excludeUserId) {
+      throw new ConflictException(registrationBlockMessage(existing, 'phone'));
     }
   }
 
@@ -254,6 +422,10 @@ export class UserService {
         '(user.firstName LIKE :search OR user.lastName LIKE :search OR user.email LIKE :search)',
         { search: `%${query.search}%` },
       );
+    }
+
+    if (query.role) {
+      qb.andWhere('role.name = :roleName', { roleName: query.role });
     }
 
     qb.orderBy(`user.${sortBy}`, query.sortOrder ?? SortOrder.DESC)
@@ -309,6 +481,16 @@ export class UserService {
 
     if (dto.isActive !== undefined) {
       user.isActive = dto.isActive;
+      if (dto.accountStatus === undefined) {
+        user.accountStatus = dto.isActive
+          ? AccountStatus.ACTIVE
+          : AccountStatus.DISABLED;
+      }
+    }
+
+    if (dto.accountStatus !== undefined) {
+      user.accountStatus = dto.accountStatus;
+      user.isActive = syncAccountActiveFlag(dto.accountStatus);
     }
 
     await this.usersRepository.save(user);
@@ -429,6 +611,18 @@ export class UserService {
       .getOne();
   }
 
+  findByIdentifier(identifier: string): Promise<User | null> {
+    const trimmed = identifier.trim();
+    return this.usersRepository
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.role', 'role')
+      .where(
+        '(LOWER(user.email) = LOWER(:identifier) OR user.phone = :identifier)',
+        { identifier: trimmed },
+      )
+      .getOne();
+  }
+
   async update(
     id: string,
     updateUserDto: UpdateUserDto,
@@ -473,7 +667,9 @@ export class UserService {
     }
 
     this.assertUserAccess(currentUser, user, PermissionAction.DELETE);
-    await this.usersRepository.delete(id);
+    user.accountStatus = AccountStatus.DISABLED;
+    user.isActive = false;
+    await this.usersRepository.save(user);
   }
 
   async findUserIdsByPartnerId(partnerId: string): Promise<string[]> {

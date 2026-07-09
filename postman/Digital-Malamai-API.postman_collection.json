@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "digital-malamai-api-v1",
     "name": "Digital Malamai API",
-    "description": "NestJS backend for Digital Malamai.\n\n**Base URL:** `{{baseUrl}}`\n\n**Auth:** Bearer `{{accessToken}}` (set automatically after Staff Login or Student Login).\n\n**Response envelope:**\n```json\n{ \"status\": true, \"message\": \"...\", \"data\": {} }\n```\n\n**Errors:**\n```json\n{ \"status\": false, \"message\": \"...\", \"error\": \"...\" }\n```",
+    "description": "NestJS backend for Digital Malamai.\n\n**Base URL:** `{{baseUrl}}`\n\n**Auth:** Bearer `{{accessToken}}` (set automatically after Staff Login or Student Login).\n\n**Response envelope:**\n```json\n{ \"status\": true, \"message\": \"...\", \"data\": {} }\n```\n\n**Errors:** `message` is human-readable; `error` is the status category or validation array.\n```json\n{ \"status\": false, \"message\": \"Access code has already been used\", \"error\": \"Conflict\" }\n```",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -16,8 +16,8 @@
     ]
   },
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:3000/api/v1" },
-    { "key": "rootUrl", "value": "http://localhost:3000" },
+    { "key": "baseUrl", "value": "http://localhost:3001/api/v1" },
+    { "key": "rootUrl", "value": "http://localhost:3001" },
     { "key": "accessToken", "value": "" },
     { "key": "userId", "value": "" },
     { "key": "roleId", "value": "" },
@@ -204,6 +204,19 @@
           }
         },
         {
+          "name": "Update profile",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Updated\",\n  \"lastName\": \"Name\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/profile",
+            "description": "Authenticated user updates own firstName / lastName (all roles)."
+          }
+        },
+        {
           "name": "OTP — send",
           "request": {
             "method": "POST",
@@ -304,14 +317,17 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/admin/users?page=1&limit=20",
+              "raw": "{{baseUrl}}/admin/users?page=1&limit=20&role=",
               "host": ["{{baseUrl}}"],
               "path": ["admin", "users"],
               "query": [
                 { "key": "page", "value": "1" },
-                { "key": "limit", "value": "20" }
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "role", "value": "", "description": "superadmin | admin | manager | partner" }
               ]
-            }
+            },
+            "description": "Paginated staff accounts. Optional: `search`, `role`, `sortBy`, `sortOrder`."
           }
         },
         {
@@ -345,7 +361,7 @@
             ]
           },
           "request": {
-            "method": "PATCH",
+            "method": "PUT",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
@@ -569,7 +585,7 @@
             {
               "name": "Change password (required on first login)",
               "request": {
-                "method": "PATCH",
+                "method": "PUT",
                 "header": [
                   { "key": "Content-Type", "value": "application/json" }
                 ],
@@ -618,6 +634,79 @@
                 "header": [],
                 "url": "{{baseUrl}}/partners/revenue"
               }
+            },
+            {
+              "name": "Get course by slug",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/partners/courses/slug/{{courseSlug}}"
+              }
+            },
+            {
+              "name": "List enrollments",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/partners/enrollments?page=1&limit=20"
+              }
+            },
+            {
+              "name": "Onboarding payments",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/partners/payments/onboarding?page=1&limit=20"
+              }
+            },
+            {
+              "name": "Course payments",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/partners/payments/courses?page=1&limit=20"
+              }
+            },
+            {
+              "name": "List team users",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{baseUrl}}/partners/team-users"
+              }
+            },
+            {
+              "name": "Create team user",
+              "request": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"firstName\": \"Team\",\n  \"lastName\": \"Member\",\n  \"email\": \"team@partner.com\"\n}"
+                },
+                "url": "{{baseUrl}}/partners/team-users",
+                "description": "Max 5 team login users per partner."
+              }
+            },
+            {
+              "name": "Update team user",
+              "request": {
+                "method": "PUT",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"firstName\": \"Updated\"\n}"
+                },
+                "url": "{{baseUrl}}/partners/team-users/{{userId}}"
+              }
+            },
+            {
+              "name": "Delete team user",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": "{{baseUrl}}/partners/team-users/{{userId}}"
+              }
             }
           ]
         }
@@ -656,7 +745,8 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/admin/partners?page=1&limit=20"
+            "url": "{{baseUrl}}/admin/partners?page=1&limit=20&search=&status=",
+            "description": "Paginated. Optional query: `search`, `status` (active | inactive | disabled), `sortBy`, `sortOrder`."
           }
         },
         {
@@ -919,6 +1009,14 @@
           }
         },
         {
+          "name": "Get course by slug",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/courses/slug/{{courseSlug}}"
+          }
+        },
+        {
           "name": "Create course",
           "request": {
             "method": "POST",
@@ -1122,6 +1220,15 @@
             "url": "{{baseUrl}}/onboarding/status",
             "description": "Student auth required"
           }
+        },
+        {
+          "name": "Skip phone verification",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/onboarding/skip-phone-verification",
+            "description": "Student auth required. Advances onboarding when phone OTP is not required."
+          }
         }
       ]
     },
@@ -1172,6 +1279,20 @@
       ]
     },
     {
+      "name": "Admin Dashboard",
+      "item": [
+        {
+          "name": "Dashboard overview",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/dashboard/overview",
+            "description": "Aggregated stats, payment trends, breakdown, and recent students. Amounts are numeric (not decimal strings)."
+          }
+        }
+      ]
+    },
+    {
       "name": "Admin Reports",
       "item": [
         {
@@ -1179,7 +1300,8 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/admin/students?page=1&limit=20"
+            "url": "{{baseUrl}}/admin/students?page=1&limit=20",
+            "description": "Optional filters: `search`, `partnerId`, `onboardingStatus`, `isActive`, `dateFrom`, `dateTo`."
           }
         },
         {
@@ -1187,7 +1309,8 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/admin/enrollments?page=1&limit=20"
+            "url": "{{baseUrl}}/admin/enrollments?page=1&limit=20",
+            "description": "Optional filters: `search`, `partnerId`, `courseId`, `dateFrom`, `dateTo`."
           }
         },
         {
@@ -1195,7 +1318,8 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/admin/payments/onboarding?page=1&limit=20"
+            "url": "{{baseUrl}}/admin/payments/onboarding?page=1&limit=20",
+            "description": "Optional filters: `search`, `partnerId`, `paymentStatus`, `dateFrom`, `dateTo`."
           }
         },
         {
@@ -1203,7 +1327,17 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/admin/payments/courses?page=1&limit=20"
+            "url": "{{baseUrl}}/admin/payments/courses?page=1&limit=20",
+            "description": "Optional filters: `search`, `partnerId`, `courseId`, `paymentStatus`, `dateFrom`, `dateTo`."
+          }
+        },
+        {
+          "name": "List transactions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/transactions?page=1&limit=20",
+            "description": "Unified payment transactions. Optional filters: `search`, `partnerId`, `courseId`, `paidFor`, `paymentStatus`, `dateFrom`, `dateTo`."
           }
         }
       ]

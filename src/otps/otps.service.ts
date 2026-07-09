@@ -44,6 +44,15 @@ export class OtpsService {
     const user = await this.getStudentUser(userId);
     const purpose = this.resolveVerificationPurpose(channel);
 
+    const alreadyVerified =
+      channel === OtpChannel.EMAIL
+        ? Boolean(user.emailVerifiedAt)
+        : Boolean(user.phoneVerifiedAt);
+
+    if (alreadyVerified) {
+      throw new BadRequestException(`Your ${channel} is already verified`);
+    }
+
     this.assertChannelDestination(user, channel);
 
     return this.createAndDispatchOtp(user, channel, purpose);

@@ -11,6 +11,7 @@ import {
 } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { OnboardingStatus } from '../../common/types/onboarding-status.type';
+import { AccountStatus } from '../../common/types/account-status.type';
 import { AccessCode } from '../../access-codes/entities/access-code.entity';
 import { Partner } from '../../partners/entities/partner.entity';
 import { Role } from '../../roles/entities/role.entity';
@@ -40,6 +41,9 @@ export class User {
   @Column({ type: 'datetime', nullable: true })
   phoneVerifiedAt: Date | null;
 
+  @Column({ type: 'datetime', nullable: true })
+  phoneVerificationSkippedAt: Date | null;
+
   @Column({
     type: 'enum',
     enum: OnboardingStatus,
@@ -49,6 +53,13 @@ export class User {
 
   @Column({ default: true })
   isActive: boolean;
+
+  @Column({
+    type: 'enum',
+    enum: AccountStatus,
+    default: AccountStatus.ACTIVE,
+  })
+  accountStatus: AccountStatus;
 
   @Column({ default: false })
   mustChangePassword: boolean;

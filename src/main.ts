@@ -43,7 +43,7 @@ async function bootstrap() {
     .addBearerAuth()
     .setTitle('Digital Malamai API')
     .setDescription(
-      'NestJS API with ABAC authorization.\n\n' +
+      'Digital Malamai API.\n\n' +
         '**Success envelope:** `{ status: true, message: string, data: T }`\n\n' +
         '**Error envelope:** `{ status: false, message: string, error: string | string[] }`\n\n' +
         'Paginated `data` shape: `{ data: T[], meta: { page, limit, total, totalPages, hasNextPage, hasPreviousPage } }`',

@@ -4,11 +4,12 @@ import {
   Get,
   HttpCode,
   HttpStatus,
-  Patch,
+  Put,
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ResponseMessage } from '../common/decorators/response-message.decorator';
 import {
   ApiCreatedData,
@@ -38,6 +39,7 @@ import { OtpsService } from '../otps/otps.service';
 import { UserService } from '../user/user.service';
 import { AuthService } from './auth.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RegisterStudentDto } from './dto/register-student.dto';
 import { SignInDto } from './dto/sign-in.dto';
 import { StudentSignInDto } from './dto/student-sign-in.dto';
@@ -45,6 +47,7 @@ import { VerifyOnboardingPaymentDto } from '../payments/dto/verify-onboarding-pa
 import { CheckPaymentEligibilityDto } from '../payments/dto/check-payment-eligibility.dto';
 
 @ApiTags('auth')
+@Throttle({ default: { limit: 20, ttl: 60_000 } })
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -54,6 +57,11 @@ export class AuthController {
   ) {}
 
   @Post('login')
+  @ApiOperation({
+    summary: 'Unified login for all roles (student, partner, staff, superadmin)',
+    description:
+      'Authenticate with email or phone number plus a password (or a student access code).',
+  })
   @ApiCreatedData(AuthTokenResponseDto)
   @ResponseMessage('Login successful')
   login(@Body() signInDto: SignInDto) {
@@ -61,8 +69,9 @@ export class AuthController {
   }
 
   @Post('staff/login')
+  @ApiOperation({ deprecated: true, summary: 'Deprecated — use POST /auth/login' })
   @ApiCreatedData(AuthTokenResponseDto)
-  @ResponseMessage('Staff login successful')
+  @ResponseMessage('Login successful')
   staffLogin(@Body() signInDto: SignInDto) {
     return this.authService.login(signInDto);
   }
@@ -97,8 +106,9 @@ export class AuthController {
   }
 
   @Post('student/login')
+  @ApiOperation({ deprecated: true, summary: 'Deprecated — use POST /auth/login' })
   @ApiCreatedData(AuthTokenResponseDto)
-  @ResponseMessage('Student login successful')
+  @ResponseMessage('Login successful')
   studentLogin(@Body() dto: StudentSignInDto) {
     return this.authService.studentLogin(dto);
   }
@@ -145,7 +155,7 @@ export class AuthController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @SkipMustChangePasswordCheck()
-  @Patch('change-password')
+  @Put('change-password')
   @ApiOkData(MessageResponseDto)
   @ResponseMessage('Password changed successfully')
   changePassword(
@@ -153,6 +163,19 @@ export class AuthController {
     @Body() dto: ChangePasswordDto,
   ) {
     return this.authService.changePassword(user.id, dto);
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @SkipMustChangePasswordCheck()
+  @Put('profile')
+  @ApiOkData(UserProfileResponseDto)
+  @ResponseMessage('Profile updated successfully')
+  updateProfile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.authService.updateProfile(user.id, dto);
   }
 
   @ApiBearerAuth()

@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/abac/decorators/current-user.decorator';
 import { RequireRole } from '../common/abac/decorators/require-role.decorator';
@@ -23,5 +23,11 @@ export class OnboardingController {
   @ResponseMessage('Onboarding status retrieved successfully')
   getStatus(@CurrentUser() user: AuthenticatedUser) {
     return this.paymentsService.getOnboardingStatus(user.id);
+  }
+
+  @Post('skip-phone-verification')
+  @ResponseMessage('Phone verification skipped')
+  skipPhoneVerification(@CurrentUser() user: AuthenticatedUser) {
+    return this.paymentsService.skipPhoneVerification(user.id);
   }
 }

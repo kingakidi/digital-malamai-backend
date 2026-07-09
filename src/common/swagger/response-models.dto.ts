@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { AccountStatus } from '../types/account-status.type';
 import { OnboardingStatus } from '../types/onboarding-status.type';
 import { PartnerStatus } from '../types/partner-status.type';
 import {
@@ -108,6 +109,9 @@ export class UserResponseDto {
 
   @ApiProperty()
   isActive: boolean;
+
+  @ApiProperty({ enum: AccountStatus })
+  accountStatus: AccountStatus;
 
   @ApiProperty({
     description:
@@ -490,8 +494,8 @@ export class PaymentTransactionResponseDto {
   @ApiProperty({ enum: PaidFor })
   paidFor: PaidFor;
 
-  @ApiProperty({ format: 'uuid' })
-  userId: string;
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  userId: string | null;
 
   @ApiPropertyOptional({ format: 'uuid', nullable: true })
   partnerId: string | null;
@@ -594,8 +598,8 @@ export class PaymentSyncItemResponseDto {
   @ApiPropertyOptional({ enum: PaidFor, nullable: true })
   paidFor: PaidFor | null;
 
-  @ApiProperty({ enum: ['synced', 'skipped', 'failed'] })
-  status: 'synced' | 'skipped' | 'failed';
+  @ApiProperty({ enum: ['synced', 'recorded', 'skipped', 'failed'] })
+  status: 'synced' | 'recorded' | 'skipped' | 'failed';
 
   @ApiPropertyOptional()
   reason?: string;
@@ -617,6 +621,11 @@ export class PaymentSyncSummaryResponseDto {
   @ApiProperty()
   synced: number;
 
+  @ApiProperty({
+    description: 'Failed Flutterwave payments saved locally without enrollment',
+  })
+  recorded: number;
+
   @ApiProperty()
   skipped: number;
 
@@ -636,6 +645,9 @@ export class OnboardingStatusResponseDto {
 
   @ApiPropertyOptional({ nullable: true })
   phoneVerifiedAt: Date | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  phoneVerificationSkippedAt: Date | null;
 
   @ApiProperty()
   expectedOnboardingFee: number;

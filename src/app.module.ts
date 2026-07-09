@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
-import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AccessCodesModule } from './access-codes/access-codes.module';
 import { AbacModule } from './common/abac/abac.module';
@@ -17,6 +18,7 @@ import messagingConfig from './config/messaging.config';
 import otpConfig from './config/otp.config';
 import smtpConfig from './config/smtp.config';
 import jwtConfig from './config/jwt.config';
+import throttleConfig from './config/throttle.config';
 import { AuthModule } from './auth/auth.module';
 import { CoursesModule } from './courses/courses.module';
 import { MailModule } from './mail/mail.module';
@@ -46,6 +48,17 @@ import { WelcomeModule } from './welcome/welcome.module';
         otpConfig,
         messagingConfig,
         flutterwaveConfig,
+        throttleConfig,
+      ],
+    }),
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => [
+        {
+          ttl: configService.get<number>('throttle.ttl') ?? 60_000,
+          limit: configService.get<number>('throttle.limit') ?? 100,
+        },
       ],
     }),
     TypeOrmModule.forRootAsync({
@@ -60,6 +73,8 @@ import { WelcomeModule } from './welcome/welcome.module';
         database: configService.get<string>('database.database'),
         autoLoadEntities: true,
         synchronize: configService.get<boolean>('database.synchronize'),
+        migrations: [__dirname + '/database/migrations/*{.ts,.js}'],
+        migrationsRun: configService.get<boolean>('database.migrationsRun'),
       }),
     }),
     AbacModule,
@@ -80,6 +95,7 @@ import { WelcomeModule } from './welcome/welcome.module';
     AdminModule,
   ],
   providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_INTERCEPTOR, useClass: ResponseInterceptor },
     { provide: APP_INTERCEPTOR, useClass: RequestDebugInterceptor },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },

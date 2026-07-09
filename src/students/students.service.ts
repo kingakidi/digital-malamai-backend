@@ -9,8 +9,15 @@ import { DataSource, EntityManager, Repository } from 'typeorm';
 import { RegisterStudentDto } from '../auth/dto/register-student.dto';
 import { StudentSignInDto } from '../auth/dto/student-sign-in.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { ReportFilterQueryDto } from '../common/dto/report-filter-query.dto';
 import { PaginatedResult } from '../common/interfaces/pagination.interface';
 import { OnboardingStatus } from '../common/types/onboarding-status.type';
+import { AccountStatus } from '../common/types/account-status.type';
+import {
+  assertAccountCanAuthenticate,
+  registrationBlockMessage,
+  syncAccountActiveFlag,
+} from '../common/utils/account-access.util';
 import { PartnerStatus } from '../common/types/partner-status.type';
 import { RoleName } from '../common/types/permission.types';
 import { SortOrder } from '../common/types/sort-order.type';
@@ -66,12 +73,16 @@ export class StudentsService {
       input.email.toLowerCase(),
     );
     if (existingEmail) {
-      throw new ConflictException('Student account already exists for this email');
+      throw new ConflictException(
+        registrationBlockMessage(existingEmail, 'email'),
+      );
     }
 
     const existingPhone = await this.userService.findByPhone(input.phone);
     if (existingPhone) {
-      throw new ConflictException('Phone number already exists');
+      throw new ConflictException(
+        registrationBlockMessage(existingPhone, 'phone'),
+      );
     }
 
     const partner = await this.partnersService.findOneEntity(input.partnerId);
@@ -132,11 +143,13 @@ export class StudentsService {
   async login(dto: StudentSignInDto) {
     const user = await this.userService.findStudentByIdentifier(dto.identifier);
 
-    if (!user || !user.isActive) {
+    if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const isValid = await this.validateStudentCredential(user, dto.credential);
+    assertAccountCanAuthenticate(user);
+
+    const isValid = await this.validateCredential(user, dto.credential);
 
     if (!isValid) {
       throw new UnauthorizedException('Invalid credentials');
@@ -156,7 +169,7 @@ export class StudentsService {
   }
 
   async findAllStudents(
-    query: PaginationQueryDto,
+    query: ReportFilterQueryDto,
   ): Promise<PaginatedResult<ReturnType<UserService['sanitizeUser']>>> {
     const skip = getPaginationSkip(query.page, query.limit);
 
@@ -165,6 +178,30 @@ export class StudentsService {
       .leftJoinAndSelect('user.role', 'role')
       .leftJoinAndSelect('user.partner', 'partner')
       .where('role.name = :roleName', { roleName: RoleName.STUDENT });
+
+    if (query.partnerId) {
+      qb.andWhere('user.partnerId = :partnerId', { partnerId: query.partnerId });
+    }
+
+    if (query.onboardingStatus) {
+      qb.andWhere('user.onboardingStatus = :onboardingStatus', {
+        onboardingStatus: query.onboardingStatus,
+      });
+    }
+
+    if (query.isActive !== undefined) {
+      qb.andWhere('user.isActive = :isActive', { isActive: query.isActive });
+    }
+
+    if (query.dateFrom) {
+      qb.andWhere('user.createdAt >= :dateFrom', { dateFrom: query.dateFrom });
+    }
+
+    if (query.dateTo) {
+      qb.andWhere('user.createdAt <= :dateTo', {
+        dateTo: `${query.dateTo} 23:59:59`,
+      });
+    }
 
     if (query.search) {
       qb.andWhere(
@@ -255,10 +292,7 @@ export class StudentsService {
     return partner;
   }
 
-  private async validateStudentCredential(
-    user: User,
-    credential: string,
-  ): Promise<boolean> {
+  async validateCredential(user: User, credential: string): Promise<boolean> {
     if (user.password) {
       return bcrypt.compare(credential, user.password);
     }
@@ -272,6 +306,21 @@ export class StudentsService {
     });
 
     return accessCode?.code === credential.toUpperCase();
+  }
+
+  async patchStudentAccount(
+    id: string,
+    accountStatus: AccountStatus,
+  ): Promise<User> {
+    const user = await this.userService.findByIdWithRole(id);
+
+    if (!user || user.role.name !== RoleName.STUDENT) {
+      throw new NotFoundException(`Student ${id} not found`);
+    }
+
+    user.accountStatus = accountStatus;
+    user.isActive = syncAccountActiveFlag(accountStatus);
+    return this.usersRepository.save(user);
   }
 
   private splitFullName(fullName: string): {

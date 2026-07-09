@@ -50,7 +50,7 @@ export class SettingsService {
   }
 
   async resolveOnboardingFeeForPartner(partnerFee: number | null): Promise<number> {
-    if (partnerFee != null) {
+    if (partnerFee != null && Number(partnerFee) > 0) {
       return Number(partnerFee);
     }
 

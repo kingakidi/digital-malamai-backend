@@ -10,6 +10,7 @@ import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
 import { UserService } from '../../../user/user.service';
+import { assertAccountCanAuthenticate } from '../../utils/account-access.util';
 import { SKIP_MUST_CHANGE_PASSWORD_KEY } from '../decorators/skip-must-change-password.decorator';
 import { AuthenticatedUser } from '../../interfaces/authenticated-user.interface';
 import { RoleName } from '../../types/permission.types';
@@ -45,9 +46,11 @@ export class JwtAuthGuard implements CanActivate {
 
       const user = await this.userService.findByIdWithRole(payload.sub);
 
-      if (!user || !user.isActive) {
+      if (!user) {
         throw new UnauthorizedException('User not found or inactive');
       }
+
+      assertAccountCanAuthenticate(user);
 
       const authenticatedUser: AuthenticatedUser = {
         id: user.id,

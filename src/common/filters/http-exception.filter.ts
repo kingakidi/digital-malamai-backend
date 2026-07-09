@@ -24,13 +24,15 @@ export class HttpExceptionFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
-      message =
-        HTTP_STATUS_MESSAGES[status] ??
-        HttpStatus[status] ??
-        'Error';
+      const statusLabel =
+        HTTP_STATUS_MESSAGES[status] ?? HttpStatus[status] ?? 'Error';
+
+      message = statusLabel;
+      error = statusLabel;
 
       if (typeof exceptionResponse === 'string') {
-        error = exceptionResponse;
+        message = exceptionResponse;
+        error = statusLabel;
       } else if (typeof exceptionResponse === 'object') {
         const body = exceptionResponse as Record<string, unknown>;
 
@@ -38,9 +40,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
           message = 'Validation failed';
           error = body.message as string[];
         } else if (typeof body.message === 'string') {
-          error = body.message;
+          message = body.message;
+          error = typeof body.error === 'string' ? body.error : statusLabel;
         } else {
-          error = (body.error as string) ?? message;
+          message = statusLabel;
+          error = (body.error as string) ?? statusLabel;
         }
       }
     }

@@ -45,4 +45,14 @@ export class PaginationQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by status (entity-specific)' })
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by role name (staff users)' })
+  @IsOptional()
+  @IsString()
+  role?: string;
 }

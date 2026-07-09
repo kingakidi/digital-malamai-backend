@@ -50,6 +50,7 @@ import {
   normalizePaidFor,
   parsePaymentMetadata,
   roundMoney,
+  tryResolvePaidFor,
 } from './utils/payment.util';
 
 export interface VerifyPaymentInput {
@@ -168,19 +169,48 @@ export class PaymentFulfillmentService {
     await this.webhookEventsRepository.save(webhookEvent);
 
     if (!isSuccessfulWebhookStatus(parsed.eventStatus)) {
-      const skipped = {
-        skipped: true,
-        reason: 'Webhook status is not successful',
-        eventStatus: parsed.eventStatus,
-        eventType: parsed.eventType,
-      };
-      webhookEvent.processingResult = skipped;
-      await this.webhookEventsRepository.save(webhookEvent);
-      await this.paymentDebugLogger.logWebhook('webhook.skipped', skipped);
-      this.logger.warn(
-        `Webhook skipped for ${parsed.webhookEventId}: status=${parsed.eventStatus}`,
-      );
-      return skipped;
+      try {
+        const flutterwaveData = buildFlutterwaveDataFromWebhook(payload, parsed);
+        const recorded = await this.recordFailedPayment({
+          flutterwaveData,
+          webhookMeta: parsed.meta,
+          registrationFallback: this.buildRegistrationFallback(
+            parsed.meta,
+            parsed.customer,
+          ),
+          source: 'webhook',
+          failureReason: `Flutterwave payment status: ${parsed.eventStatus}`,
+        });
+
+        const result = {
+          recorded: true,
+          paymentFailed: true,
+          transactionId: recorded.id,
+          eventStatus: parsed.eventStatus,
+        };
+        webhookEvent.processingResult = result;
+        await this.webhookEventsRepository.save(webhookEvent);
+        await this.paymentDebugLogger.logWebhook('webhook.failed_recorded', result);
+        this.logger.warn(
+          `Recorded failed payment for webhook ${parsed.webhookEventId}: status=${parsed.eventStatus}`,
+        );
+        return result;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const skipped = {
+          skipped: true,
+          reason: `Could not record failed payment: ${message}`,
+          eventStatus: parsed.eventStatus,
+          eventType: parsed.eventType,
+        };
+        webhookEvent.processingResult = skipped;
+        await this.webhookEventsRepository.save(webhookEvent);
+        await this.paymentDebugLogger.logWebhook('webhook.skipped', skipped);
+        this.logger.warn(
+          `Webhook skipped for ${parsed.webhookEventId}: status=${parsed.eventStatus}, ${message}`,
+        );
+        return skipped;
+      }
     }
 
     if (!parsed.transactionId && !parsed.txRef) {
@@ -265,11 +295,137 @@ export class PaymentFulfillmentService {
       onboardingStatus: user.onboardingStatus,
       emailVerifiedAt: user.emailVerifiedAt,
       phoneVerifiedAt: user.phoneVerifiedAt,
+      phoneVerificationSkippedAt: user.phoneVerificationSkippedAt,
       expectedOnboardingFee: expectedFee,
       latestOnboardingPayment: latestOnboardingPayment
         ? this.serializeTransaction(latestOnboardingPayment)
         : null,
     };
+  }
+
+  async skipPhoneVerification(userId: string) {
+    const user = await this.userService.findByIdWithRole(userId);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (user.phoneVerifiedAt) {
+      throw new BadRequestException('Your phone is already verified');
+    }
+
+    const hasPaidOnboarding = await this.transactionsRepository.findOne({
+      where: {
+        userId,
+        paidFor: PaidFor.ONBOARDING,
+        status: PaymentStatus.SUCCESS,
+      },
+    });
+
+    if (!hasPaidOnboarding) {
+      throw new BadRequestException(
+        'Complete the onboarding payment before skipping phone verification',
+      );
+    }
+
+    user.phoneVerificationSkippedAt = new Date();
+    // Paying the onboarding fee completes onboarding; phone verification is
+    // optional, so record the skip and keep the student fully onboarded.
+    user.onboardingStatus = OnboardingStatus.ONBOARDED;
+    await this.userService.save(user);
+
+    return {
+      onboardingStatus: user.onboardingStatus,
+      phoneVerifiedAt: user.phoneVerifiedAt,
+      phoneVerificationSkippedAt: user.phoneVerificationSkippedAt,
+    };
+  }
+
+  async recordFailedPayment(input: {
+    flutterwaveData: FlutterwaveVerifyData;
+    webhookMeta?: PaymentMetadata;
+    registrationFallback?: Partial<OnboardingRegistrationInput>;
+    source: 'webhook' | 'sync';
+    failureReason: string;
+  }): Promise<PaymentTransaction> {
+    const metadata = mergePaymentMetadata(
+      parsePaymentMetadata(input.flutterwaveData.meta),
+      input.webhookMeta,
+      input.registrationFallback,
+    );
+
+    const paidFor = tryResolvePaidFor(metadata.paidFor);
+
+    if (!paidFor) {
+      throw new BadRequestException(
+        'Payment metadata must include paidFor onboarding/course to record a failed payment',
+      );
+    }
+
+    const existing = await this.findExistingTransaction(input.flutterwaveData);
+
+    if (
+      existing &&
+      existing.status === PaymentStatus.SUCCESS &&
+      existing.fulfillmentCompleted
+    ) {
+      return existing;
+    }
+
+    const email = (
+      metadata.email ??
+      input.flutterwaveData.customer?.email ??
+      input.registrationFallback?.email
+    )?.toLowerCase();
+
+    const user = email ? await this.userService.findByEmail(email) : null;
+    const partnerId =
+      metadata.partnerId ??
+      input.registrationFallback?.partnerId ??
+      user?.partnerId ??
+      null;
+
+    const fees = roundMoney(
+      Number(input.flutterwaveData.app_fee ?? 0) +
+        Number(input.flutterwaveData.merchant_fee ?? 0),
+    );
+
+    const payload =
+      existing ??
+      this.transactionsRepository.create({
+        paymentPlatform: PaymentPlatform.FLUTTERWAVE,
+        externalTransactionId: String(input.flutterwaveData.id),
+      });
+
+    payload.txRef = input.flutterwaveData.tx_ref || null;
+    payload.flwRef = input.flutterwaveData.flw_ref ?? null;
+    payload.paidFor = paidFor;
+    payload.userId = user?.id ?? null;
+    payload.partnerId = partnerId;
+    payload.courseId = metadata.courseId ?? null;
+    payload.amount = Number(input.flutterwaveData.amount);
+    payload.fees = fees;
+    payload.partnerCut = 0;
+    payload.platformCut = 0;
+    payload.currency = input.flutterwaveData.currency;
+    payload.status = PaymentStatus.FAILED;
+    payload.fulfillmentCompleted = false;
+    payload.metadata = {
+      ...metadata,
+      failureReason: input.failureReason,
+      flutterwaveStatus: input.flutterwaveData.status,
+      flutterwave: input.flutterwaveData,
+      payerEmail: email ?? null,
+    };
+    payload.verifiedAt = new Date();
+
+    if (input.source === 'webhook') {
+      payload.webhookVerified = true;
+    } else {
+      payload.apiVerified = true;
+    }
+
+    return this.transactionsRepository.save(payload);
   }
 
   private async processVerification(input: VerifyPaymentInput) {

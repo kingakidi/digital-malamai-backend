@@ -88,12 +88,20 @@ export class FlutterwaveService {
     from: string,
     to: string,
   ): Promise<FlutterwaveVerifyData[]> {
+    const all = await this.fetchAllTransactions(from, to);
+    return all.filter((transaction) => this.isSuccessfulPayment(transaction));
+  }
+
+  async fetchAllTransactions(
+    from: string,
+    to: string,
+  ): Promise<FlutterwaveVerifyData[]> {
     const fetchTimeoutMs =
       this.configService.get<number>('flutterwave.requestTimeoutMs') ?? 20000;
     const totalTimeoutMs = Math.max(fetchTimeoutMs * 3, 60000);
 
     return Promise.race([
-      this.fetchAllSuccessfulTransactionsPages(from, to),
+      this.fetchAllTransactionsPages(from, to),
       new Promise<FlutterwaveVerifyData[]>((_, reject) => {
         setTimeout(() => {
           reject(
@@ -106,7 +114,7 @@ export class FlutterwaveService {
     ]);
   }
 
-  private async fetchAllSuccessfulTransactionsPages(
+  private async fetchAllTransactionsPages(
     from: string,
     to: string,
   ): Promise<FlutterwaveVerifyData[]> {
@@ -134,10 +142,7 @@ export class FlutterwaveService {
       );
 
       for (const item of pageItems) {
-        const normalized = this.normalizeVerifyData(item);
-        if (this.isSuccessfulPayment(normalized)) {
-          transactions.push(normalized);
-        }
+        transactions.push(this.normalizeVerifyData(item));
       }
 
       if (pageItems.length === 0) {
@@ -148,7 +153,7 @@ export class FlutterwaveService {
     }
 
     this.logger.log(
-      `Fetched ${transactions.length} successful Flutterwave transaction(s)`,
+      `Fetched ${transactions.length} Flutterwave transaction(s)`,
     );
 
     return transactions;

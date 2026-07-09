@@ -1,7 +1,6 @@
 import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
 import { buildRolePermissionView } from '../common/utils/permission.util';
 import { PaidFor } from '../common/types/payment.types';
 import { PaymentEligibilityService } from '../payments/payment-eligibility.service';
@@ -13,6 +12,8 @@ import { UserService } from '../user/user.service';
 import { RegisterStudentDto } from './dto/register-student.dto';
 import { SignInDto } from './dto/sign-in.dto';
 import { StudentSignInDto } from './dto/student-sign-in.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { assertAccountCanAuthenticate } from '../common/utils/account-access.util';
 
 @Injectable()
 export class AuthService {
@@ -26,23 +27,20 @@ export class AuthService {
   ) {}
 
   async login(signInDto: SignInDto) {
-    const user = await this.userService.findByEmail(signInDto.email);
+    const user = await this.userService.findByIdentifier(signInDto.email);
 
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    if (!user.isActive) {
-      throw new UnauthorizedException('Account is inactive');
-    }
+    assertAccountCanAuthenticate(user);
 
-    if (!user.password) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
+    const isValid = await this.studentsService.validateCredential(
+      user,
+      signInDto.password,
+    );
 
-    const isMatch = await bcrypt.compare(signInDto.password, user.password);
-
-    if (!isMatch) {
+    if (!isValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -91,9 +89,8 @@ export class AuthService {
     return this.paymentEligibilityService.checkEligibility(dto);
   }
 
-  async studentLogin(dto: StudentSignInDto) {
-    const user = await this.studentsService.login(dto);
-    return this.buildAuthResponse(user);
+  studentLogin(dto: StudentSignInDto) {
+    return this.login({ email: dto.identifier, password: dto.credential });
   }
 
   changePassword(userId: string, dto: { currentPassword: string; newPassword: string }) {
@@ -102,6 +99,26 @@ export class AuthService {
       dto.currentPassword,
       dto.newPassword,
     );
+  }
+
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const profile = await this.userService.updateOwnProfile(userId, dto);
+
+    if (!profile) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const sanitized = this.userService.sanitizeUser(profile);
+    const rolePermissions = buildRolePermissionView(profile.role.permissions);
+
+    return {
+      ...sanitized,
+      role: {
+        ...sanitized.role,
+        permissionKeys: rolePermissions.permissionKeys,
+        permissionGroups: rolePermissions.permissionGroups,
+      },
+    };
   }
 
   private async buildAuthResponse(user: Awaited<ReturnType<UserService['findByEmail']>>) {

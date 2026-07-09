@@ -1,13 +1,13 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
   NotFoundException,
   Param,
   ParseUUIDPipe,
-  Patch,
   Post,
   Put,
   Query,
@@ -23,6 +23,7 @@ import { PermissionGuard } from '../common/abac/guards/permission.guard';
 import { RoleGuard } from '../common/abac/guards/role.guard';
 import { ResponseMessage } from '../common/decorators/response-message.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { ReportFilterQueryDto } from '../common/dto/report-filter-query.dto';
 import { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
 import {
   PermissionAction,
@@ -32,22 +33,29 @@ import {
 import { CreatePartnerWithUserDto } from './dto/create-partner-with-user.dto';
 import { ChangePartnerPasswordDto } from './dto/change-partner-password.dto';
 import { CreatePartnerDto } from './dto/create-partner.dto';
+import {
+  CreatePartnerTeamUserDto,
+  UpdatePartnerTeamUserDto,
+} from './dto/partner-team-user.dto';
 import { UpdatePartnerFeesDto } from './dto/update-partner-fees.dto';
 import { UpdatePartnerDto } from './dto/update-partner.dto';
 import {
   ApiCreatedData,
   ApiOkData,
   ApiOkPaginated,
+  CourseEnrollmentReportDto,
   CourseResponseDto,
   CreatePartnerWithUserResponseDto,
   MessageResponseDto,
   PartnerResponseDto,
   PartnerRevenueResponseDto,
+  PaymentTransactionResponseDto,
   PublicPartnerResponseDto,
   UserResponseDto,
 } from '../common/swagger';
 import { CoursesService } from '../courses/courses.service';
 import { StudentsService } from '../students/students.service';
+import { UserService } from '../user/user.service';
 import { PartnersService } from './partners.service';
 
 @ApiTags('partners')
@@ -80,7 +88,7 @@ export class PartnersController {
     return this.partnersService.update(user.partnerId, updatePartnerDto);
   }
 
-  @Get(':id')
+  @Get('public/:id')
   @ApiOkData(PublicPartnerResponseDto)
   @ResponseMessage('Partner retrieved successfully')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
@@ -98,9 +106,10 @@ export class PartnerPortalController {
     private readonly partnersService: PartnersService,
     private readonly coursesService: CoursesService,
     private readonly studentsService: StudentsService,
+    private readonly userService: UserService,
   ) {}
 
-  @Patch('profile/me/password')
+  @Put('profile/me/password')
   @SkipMustChangePasswordCheck()
   @ApiOkData(MessageResponseDto)
   @RequirePermission(PermissionResource.PARTNERS, PermissionAction.UPDATE)
@@ -110,6 +119,17 @@ export class PartnerPortalController {
     @Body() dto: ChangePartnerPasswordDto,
   ) {
     return this.partnersService.changeOwnPassword(user.id, dto);
+  }
+
+  @Get('courses/slug/:slug')
+  @ApiOkData(CourseResponseDto)
+  @RequirePermission(PermissionResource.PARTNERS, PermissionAction.READ)
+  @ResponseMessage('Partner course retrieved successfully')
+  findCourseBySlug(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('slug') slug: string,
+  ) {
+    return this.coursesService.findCourseBySlugForPartner(user.partnerId!, slug);
   }
 
   @Get('courses')
@@ -134,12 +154,118 @@ export class PartnerPortalController {
     return this.studentsService.findStudentsForPartner(user.partnerId!, query);
   }
 
+  @Get('enrollments')
+  @ApiOkPaginated(CourseEnrollmentReportDto)
+  @RequirePermission(PermissionResource.PARTNERS, PermissionAction.READ)
+  @ResponseMessage('Partner enrollments retrieved successfully')
+  findEnrollments(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ReportFilterQueryDto,
+  ) {
+    return this.coursesService.findEnrollmentsForPartner(
+      user.partnerId!,
+      query,
+    );
+  }
+
+  @Get('enrollments/:id')
+  @ApiOkData(CourseEnrollmentReportDto)
+  @RequirePermission(PermissionResource.PARTNERS, PermissionAction.READ)
+  @ResponseMessage('Partner enrollment retrieved successfully')
+  findEnrollmentById(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    return this.coursesService.findEnrollmentById(id, user.partnerId!);
+  }
+
+  @Get('payments/onboarding')
+  @ApiOkPaginated(PaymentTransactionResponseDto)
+  @RequirePermission(PermissionResource.FINANCE, PermissionAction.READ)
+  @ResponseMessage('Partner onboarding payments retrieved successfully')
+  findOnboardingPayments(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ReportFilterQueryDto,
+  ) {
+    return this.coursesService.findOnboardingPayments(query, user.partnerId!);
+  }
+
+  @Get('payments/courses')
+  @ApiOkPaginated(PaymentTransactionResponseDto)
+  @RequirePermission(PermissionResource.FINANCE, PermissionAction.READ)
+  @ResponseMessage('Partner course payments retrieved successfully')
+  findCoursePayments(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: ReportFilterQueryDto,
+  ) {
+    return this.coursesService.findCoursePayments(query, user.partnerId!);
+  }
+
   @Get('revenue')
   @ApiOkData(PartnerRevenueResponseDto)
   @RequirePermission(PermissionResource.FINANCE, PermissionAction.READ)
   @ResponseMessage('Partner revenue summary retrieved successfully')
   getRevenue(@CurrentUser() user: AuthenticatedUser) {
     return this.coursesService.getPartnerRevenueSummary(user.partnerId!);
+  }
+
+  @Get('team-users')
+  @ApiOkData(UserResponseDto, { isArray: true })
+  @RequirePermission(PermissionResource.PARTNERS, PermissionAction.READ)
+  @ResponseMessage('Partner team users retrieved successfully')
+  listTeamUsers(@CurrentUser() user: AuthenticatedUser) {
+    if (!user.partnerId) {
+      throw new NotFoundException('Partner profile is not linked to this account');
+    }
+
+    return this.userService.listPartnerTeamUsers(user.partnerId);
+  }
+
+  @Post('team-users')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiCreatedData(UserResponseDto)
+  @RequirePermission(PermissionResource.PARTNERS, PermissionAction.UPDATE)
+  @ResponseMessage('Partner team user created successfully')
+  createTeamUser(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreatePartnerTeamUserDto,
+  ) {
+    if (!user.partnerId) {
+      throw new NotFoundException('Partner profile is not linked to this account');
+    }
+
+    return this.userService.createPartnerTeamUser(user.partnerId, dto);
+  }
+
+  @Put('team-users/:id')
+  @ApiOkData(UserResponseDto)
+  @RequirePermission(PermissionResource.PARTNERS, PermissionAction.UPDATE)
+  @ResponseMessage('Partner team user updated successfully')
+  updateTeamUser(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdatePartnerTeamUserDto,
+  ) {
+    if (!user.partnerId) {
+      throw new NotFoundException('Partner profile is not linked to this account');
+    }
+
+    return this.userService.updatePartnerTeamUser(user.partnerId, id, dto);
+  }
+
+  @Delete('team-users/:id')
+  @ApiOkData(MessageResponseDto)
+  @RequirePermission(PermissionResource.PARTNERS, PermissionAction.UPDATE)
+  @ResponseMessage('Partner team user removed successfully')
+  removeTeamUser(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    if (!user.partnerId) {
+      throw new NotFoundException('Partner profile is not linked to this account');
+    }
+
+    return this.userService.removePartnerTeamUser(user.partnerId, id);
   }
 }
 
@@ -199,7 +325,7 @@ export class AdminPartnersController {
     return this.partnersService.findOne(id);
   }
 
-  @Patch(':id')
+  @Put(':id')
   @ApiOkData(PartnerResponseDto)
   @RequirePermission(PermissionResource.PARTNERS, PermissionAction.UPDATE)
   @ResponseMessage('Partner updated successfully')
@@ -207,7 +333,7 @@ export class AdminPartnersController {
     return this.partnersService.update(id, dto);
   }
 
-  @Patch(':id/fees')
+  @Put(':id/fees')
   @ApiOkData(PartnerResponseDto)
   @RequireRole(RoleName.SUPERADMIN)
   @RequirePermission(PermissionResource.PARTNERS, PermissionAction.UPDATE)
@@ -219,7 +345,7 @@ export class AdminPartnersController {
     return this.partnersService.updateFees(id, dto);
   }
 
-  @Patch(':id/disable')
+  @Put(':id/disable')
   @ApiOkData(PartnerResponseDto)
   @RequirePermission(PermissionResource.PARTNERS, PermissionAction.UPDATE)
   @ResponseMessage('Partner disabled successfully')

@@ -7,7 +7,7 @@ import {
   PaymentPlatform,
 } from '../common/types/payment.types';
 import { PaymentTransaction } from './entities/payment-transaction.entity';
-import { parsePaymentMetadata } from './utils/payment.util';
+import { parsePaymentMetadata, tryResolvePaidFor } from './utils/payment.util';
 import { FlutterwaveService } from './flutterwave.service';
 import { PaymentDebugLogger } from './payment-debug.logger';
 import { PaymentFulfillmentService } from './payment-fulfillment.service';
@@ -16,7 +16,7 @@ export interface PaymentSyncItemResult {
   externalTransactionId: string;
   txRef: string | null;
   paidFor: PaidFor | null;
-  status: 'synced' | 'skipped' | 'failed';
+  status: 'synced' | 'recorded' | 'skipped' | 'failed';
   reason?: string;
   result?: Record<string, unknown>;
 }
@@ -27,6 +27,7 @@ export interface PaymentSyncSummary {
   to: string;
   totalFetched: number;
   synced: number;
+  recorded: number;
   skipped: number;
   failed: number;
   items: PaymentSyncItemResult[];
@@ -57,7 +58,7 @@ export class PaymentSyncService {
     this.logger.log(`Starting Flutterwave sync for ${from} to ${to} (${syncDays} day(s))`);
     await this.paymentDebugLogger.log('sync.start', { from, to, days: syncDays });
 
-    const transactions = await this.flutterwaveService.fetchAllSuccessfulTransactions(
+    const transactions = await this.flutterwaveService.fetchAllTransactions(
       from,
       to,
     );
@@ -79,13 +80,14 @@ export class PaymentSyncService {
       to,
       totalFetched: transactions.length,
       synced: items.filter((item) => item.status === 'synced').length,
+      recorded: items.filter((item) => item.status === 'recorded').length,
       skipped: items.filter((item) => item.status === 'skipped').length,
       failed: items.filter((item) => item.status === 'failed').length,
       items,
     };
 
     this.logger.log(
-      `Flutterwave sync complete: synced=${summary.synced}, skipped=${summary.skipped}, failed=${summary.failed}`,
+      `Flutterwave sync complete: synced=${summary.synced}, recorded=${summary.recorded}, skipped=${summary.skipped}, failed=${summary.failed}`,
     );
 
     await this.paymentDebugLogger.log('sync.complete', {
@@ -99,17 +101,46 @@ export class PaymentSyncService {
     transaction: FlutterwaveVerifyData,
   ): Promise<PaymentSyncItemResult> {
     const metadata = parsePaymentMetadata(transaction.meta);
-    const paidFor = metadata.paidFor?.toLowerCase() as PaidFor | undefined;
+    const paidFor = tryResolvePaidFor(metadata.paidFor);
     const base = {
       externalTransactionId: String(transaction.id),
       txRef: transaction.tx_ref || null,
-      paidFor:
-        paidFor === PaidFor.COURSE || paidFor === PaidFor.ONBOARDING
-          ? paidFor
-          : null,
+      paidFor,
     };
 
-    if (paidFor !== PaidFor.COURSE && paidFor !== PaidFor.ONBOARDING) {
+    if (!this.flutterwaveService.isSuccessfulPayment(transaction)) {
+      if (!paidFor) {
+        return {
+          ...base,
+          status: 'skipped',
+          reason: 'Failed Flutterwave payment has no paidFor onboarding/course metadata',
+        };
+      }
+
+      try {
+        await this.paymentFulfillmentService.recordFailedPayment({
+          flutterwaveData: transaction,
+          webhookMeta: metadata,
+          source: 'sync',
+          failureReason: `Flutterwave payment status: ${transaction.status}`,
+        });
+
+        return {
+          ...base,
+          status: 'recorded',
+          reason: `Recorded failed payment (${transaction.status})`,
+        };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return {
+          ...base,
+          status: 'failed',
+          reason: `Could not record failed payment: ${reason}`,
+        };
+      }
+    }
+
+    if (!paidFor) {
       return {
         ...base,
         status: 'skipped',
@@ -171,7 +202,7 @@ export class PaymentSyncService {
       return {
         ...base,
         status: 'failed',
-        reason,
+        reason: `Payment succeeded on Flutterwave but processing failed: ${reason}`,
       };
     }
   }

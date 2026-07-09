@@ -20,4 +20,8 @@ export class PaymentsService {
   getOnboardingStatus(userId: string) {
     return this.paymentFulfillmentService.getOnboardingStatus(userId);
   }
+
+  skipPhoneVerification(userId: string) {
+    return this.paymentFulfillmentService.skipPhoneVerification(userId);
+  }
 }

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -8,6 +9,7 @@ import { DataSource, Repository } from 'typeorm';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { PaginatedResult } from '../common/interfaces/pagination.interface';
 import { PartnerStatus } from '../common/types/partner-status.type';
+import { CommissionType } from '../common/types/payment.types';
 import { RoleName } from '../common/types/permission.types';
 import { SortOrder } from '../common/types/sort-order.type';
 import { generateTemporaryPassword } from '../common/utils/password.util';
@@ -50,10 +52,29 @@ export class PartnersService {
     private readonly s3Service: S3Service,
   ) {}
 
+  private assertCommissionValid(
+    commissionType?: CommissionType | null,
+    commissionValue?: number | null,
+  ): void {
+    if (
+      commissionType === CommissionType.PERCENTAGE &&
+      commissionValue != null &&
+      Number(commissionValue) > 100
+    ) {
+      throw new BadRequestException(
+        'Commission percentage cannot be greater than 100',
+      );
+    }
+  }
+
   async create(createPartnerDto: CreatePartnerDto): Promise<Partner> {
     const normalizedEmail = createPartnerDto.email.trim().toLowerCase();
     await this.assertPartnerEmailAvailable(normalizedEmail);
     await this.userService.assertEmailAvailable(normalizedEmail);
+    this.assertCommissionValid(
+      createPartnerDto.commissionType,
+      createPartnerDto.commissionValue,
+    );
 
     const partner = this.partnersRepository.create({
       ...createPartnerDto,
@@ -66,6 +87,7 @@ export class PartnersService {
     const normalizedEmail = dto.email.trim().toLowerCase();
     await this.assertPartnerEmailAvailable(normalizedEmail);
     await this.userService.assertEmailAvailable(normalizedEmail);
+    this.assertCommissionValid(dto.commissionType, dto.commissionValue);
 
     const partnerRole = await this.rolesService.findByName(RoleName.PARTNER);
 
@@ -203,6 +225,10 @@ export class PartnersService {
       );
     }
 
+    if (query.status) {
+      qb.andWhere('partner.status = :status', { status: query.status });
+    }
+
     qb.orderBy(`partner.${sortBy}`, query.sortOrder ?? SortOrder.DESC)
       .skip(skip)
       .take(query.limit);
@@ -250,6 +276,8 @@ export class PartnersService {
 
     const { email: _email, ...rest } = updatePartnerDto;
     Object.assign(partner, rest);
+
+    this.assertCommissionValid(partner.commissionType, partner.commissionValue);
 
     const savedPartner = await this.partnersRepository.save(partner);
 
@@ -312,10 +340,21 @@ export class PartnersService {
       partner.onboardPercentage = dto.onboardPercentage;
     }
 
+    this.assertCommissionValid(partner.commissionType, partner.commissionValue);
+
     return this.partnersRepository.save(partner);
   }
 
   async disable(id: string): Promise<Partner> {
-    return this.update(id, { status: PartnerStatus.DISABLED });
+    const partner = await this.findOneEntity(id);
+    const previousLogoUrl = partner.logoUrl;
+
+    partner.status = PartnerStatus.DISABLED;
+    partner.logoUrl = null;
+
+    const savedPartner = await this.partnersRepository.save(partner);
+    await this.deletePartnerLogoFromS3(previousLogoUrl);
+
+    return savedPartner;
   }
 }

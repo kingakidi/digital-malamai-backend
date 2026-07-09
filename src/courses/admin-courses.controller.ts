@@ -6,7 +6,6 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
-  Patch,
   Post,
   Put,
   Query,
@@ -45,6 +44,13 @@ export class AdminCoursesController {
     return this.coursesService.findAllCourses(query);
   }
 
+  @Get('slug/:slug')
+  @ApiOkData(CourseResponseDto)
+  @ResponseMessage('Course retrieved successfully')
+  findBySlug(@Param('slug') slug: string) {
+    return this.coursesService.findCourseBySlugForStaff(slug);
+  }
+
   @Get(':id')
   @ApiOkData(CourseResponseDto)
   @ResponseMessage('Course retrieved successfully')
@@ -67,14 +73,14 @@ export class AdminCoursesController {
     return this.coursesService.updateCourse(id, dto);
   }
 
-  @Patch(':id/publish')
+  @Put(':id/publish')
   @ApiOkData(CourseResponseDto)
   @ResponseMessage('Course publish status updated successfully')
   publish(@Param('id', ParseUUIDPipe) id: string, @Body() dto: PublishCourseDto) {
     return this.coursesService.publishCourse(id, dto);
   }
 
-  @Patch(':id/disable')
+  @Put(':id/disable')
   @ApiOkData(CourseResponseDto)
   @ResponseMessage('Course disabled successfully')
   disable(@Param('id', ParseUUIDPipe) id: string) {
@@ -105,14 +111,14 @@ export class StaffCoursesController {
     return this.coursesService.updateCourse(id, dto);
   }
 
-  @Patch(':id/publish')
+  @Put(':id/publish')
   @ApiOkData(CourseResponseDto)
   @ResponseMessage('Course publish status updated successfully')
   publish(@Param('id', ParseUUIDPipe) id: string, @Body() dto: PublishCourseDto) {
     return this.coursesService.publishCourse(id, dto);
   }
 
-  @Patch(':id/disable')
+  @Put(':id/disable')
   @ApiOkData(CourseResponseDto)
   @ResponseMessage('Course disabled successfully')
   disable(@Param('id', ParseUUIDPipe) id: string) {

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DEFAULT_ROLES } from '../common/constants/default-role-permissions.constants';
@@ -131,7 +131,12 @@ export class RolesService implements OnModuleInit {
   }
 
   async remove(id: string): Promise<void> {
-    await this.findOneEntity(id);
+    const role = await this.findOneEntity(id);
+
+    if (Object.values(RoleName).includes(role.name as RoleName)) {
+      throw new BadRequestException('System roles cannot be deleted');
+    }
+
     await this.rolesRepository.delete(id);
   }
 

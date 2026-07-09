@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Put, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../common/abac/decorators/current-user.decorator';
 import { RequireRole } from '../common/abac/decorators/require-role.decorator';
@@ -18,7 +18,7 @@ import {
   StudentEnrollmentResponseDto,
   UserResponseDto,
 } from '../common/swagger';
-import { ChangePasswordDto } from './dto/change-password.dto';
+import { StudentChangePasswordDto } from './dto/student-change-password.dto';
 import { StudentsService } from './students.service';
 
 @ApiTags('students')
@@ -57,12 +57,12 @@ export class StudentsController {
     return this.otpsService.sendPasswordResetOtpForUser(user.id, dto.type);
   }
 
-  @Patch('change-password')
+  @Put('change-password')
   @ApiOkData(MessageResponseDto)
   @ResponseMessage('Password changed successfully')
   changePassword(
     @CurrentUser() user: AuthenticatedUser,
-    @Body() dto: ChangePasswordDto,
+    @Body() dto: StudentChangePasswordDto,
   ) {
     return this.otpsService.changePasswordWithOtp(
       user.id,
