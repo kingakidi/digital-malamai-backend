@@ -65,13 +65,25 @@ done
 
 echo "Database is ready!"
 
-if [ "${DB_MIGRATIONS_RUN:-false}" = "true" ]; then
+# Default: run migrations in production. Set DB_MIGRATIONS_RUN=false to skip.
+RUN_MIGRATIONS="${DB_MIGRATIONS_RUN:-}"
+if [ -z "$RUN_MIGRATIONS" ]; then
+  if [ "${NODE_ENV}" = "production" ]; then
+    RUN_MIGRATIONS=true
+  else
+    RUN_MIGRATIONS=false
+  fi
+fi
+
+if [ "$RUN_MIGRATIONS" = "true" ]; then
   echo "Running database migrations..."
   npm run migration:run:prod || {
     echo "Migration failed!"
     exit 1
   }
   echo "Migrations completed successfully!"
+else
+  echo "Skipping migrations (DB_MIGRATIONS_RUN=$RUN_MIGRATIONS)"
 fi
 
 echo "=========================================="
