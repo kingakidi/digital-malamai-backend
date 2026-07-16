@@ -28,5 +28,5 @@ export class SystemSetting {
 }
 
 export const SYSTEM_SETTING_KEYS = {
-  ONBOARDING_FEE: 'onboarding_fee',
+  ONBOARDING_FEE: 'Onboarding Fee',
 } as const;

@@ -24,7 +24,7 @@ EXPOSE 3001
 
 ENV NODE_ENV=production
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=5 \
   CMD node -e "const http = require('http'); const port = process.env.PORT || 3001; const prefix = process.env.API_PREFIX || 'api/v1'; const options = { hostname: 'localhost', port, path: '/' + prefix + '/health', method: 'GET', timeout: 3000 }; const req = http.request(options, (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', () => process.exit(1)); req.on('timeout', () => { req.destroy(); process.exit(1); }); req.end();"
 
 ENTRYPOINT ["docker-entrypoint.sh"]
