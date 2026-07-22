@@ -83,7 +83,6 @@ export class Schema1783612421651 implements MigrationInterface {
     await queryRunner.query(`
       CREATE TABLE \`courses\` (
         \`id\` varchar(36) NOT NULL,
-        \`partnerId\` varchar(255) NOT NULL,
         \`slug\` varchar(255) NOT NULL,
         \`title\` varchar(255) NOT NULL,
         \`description\` text NULL,
@@ -92,13 +91,10 @@ export class Schema1783612421651 implements MigrationInterface {
         \`discount\` decimal(12,2) NOT NULL DEFAULT 0,
         \`isFree\` tinyint NOT NULL DEFAULT 0,
         \`status\` enum('draft','published','disabled') NOT NULL DEFAULT 'draft',
-        \`partnerCommissionType\` enum('percentage','fixed') NULL,
-        \`partnerCommissionValue\` decimal(12,2) NULL,
         \`createdAt\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
         \`updatedAt\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
         UNIQUE INDEX \`IDX_courses_slug\` (\`slug\`),
-        PRIMARY KEY (\`id\`),
-        CONSTRAINT \`FK_courses_partner\` FOREIGN KEY (\`partnerId\`) REFERENCES \`partners\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION
+        PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB
     `);
 
@@ -159,7 +155,8 @@ export class Schema1783612421651 implements MigrationInterface {
         \`title\` varchar(255) NOT NULL,
         \`vimeoUrl\` varchar(255) NOT NULL,
         \`position\` int NOT NULL DEFAULT 0,
-        \`duration\` varchar(255) NULL,
+        \`duration\` int NULL,
+        \`details\` text NULL,
         \`createdAt\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
         PRIMARY KEY (\`id\`),
         CONSTRAINT \`FK_course_videos_course\` FOREIGN KEY (\`courseId\`) REFERENCES \`courses\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION

@@ -1,9 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
-import { PartnersModule } from '../partners/partners.module';
 import { PaymentTransaction } from '../payments/entities/payment-transaction.entity';
-import { UserModule } from '../user/user.module';
 import {
   AdminCoursesController,
   StaffCoursesController,
@@ -23,9 +21,7 @@ import { CoursesService } from './courses.service';
       CourseVideo,
       PaymentTransaction,
     ]),
-    forwardRef(() => UserModule),
     forwardRef(() => AuthModule),
-    forwardRef(() => PartnersModule),
   ],
   controllers: [
     CoursesController,

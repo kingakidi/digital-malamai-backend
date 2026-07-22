@@ -1,21 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsBoolean,
-  IsEnum,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
-  IsUUID,
   Min,
 } from 'class-validator';
-import { CommissionType } from '../../common/types/payment.types';
 
 export class CreateCourseDto {
-  @ApiProperty()
-  @IsUUID()
-  partnerId: string;
-
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
@@ -31,10 +24,10 @@ export class CreateCourseDto {
   @IsString()
   description?: string;
 
-  @ApiPropertyOptional()
-  @IsOptional()
+  @ApiProperty()
   @IsString()
-  thumbnailUrl?: string;
+  @IsNotEmpty()
+  thumbnailUrl: string;
 
   @ApiPropertyOptional({ default: 0 })
   @IsOptional()
@@ -52,15 +45,4 @@ export class CreateCourseDto {
   @IsOptional()
   @IsBoolean()
   isFree?: boolean;
-
-  @ApiPropertyOptional({ enum: CommissionType })
-  @IsOptional()
-  @IsEnum(CommissionType)
-  partnerCommissionType?: CommissionType;
-
-  @ApiPropertyOptional({ minimum: 0 })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  partnerCommissionValue?: number;
 }

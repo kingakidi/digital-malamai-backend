@@ -29,8 +29,11 @@ export class CourseVideo {
   @Column({ default: 0 })
   position: number;
 
-  @Column({ type: 'varchar', nullable: true })
-  duration: string | null;
+  @Column({ type: 'int', nullable: true })
+  duration: number | null;
+
+  @Column({ type: 'text', nullable: true })
+  details: string | null;
 
   @CreateDateColumn()
   createdAt: Date;

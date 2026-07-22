@@ -5,16 +5,16 @@ import {
   Get,
   HttpCode,
   HttpStatus,
-  InternalServerErrorException,
+  Logger,
   Post,
   Query,
   Req,
   Res,
+  ServiceUnavailableException,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { JwtAuthGuard } from '../common/abac/guards/jwt-auth.guard';
@@ -25,11 +25,17 @@ import {
   MediaKeyQueryDto,
   UploadMediaQueryDto,
 } from './dto/media-query.dto';
+import { MediaUploadInterceptor } from './media-upload.interceptor';
 import { S3Service } from './s3.service';
 
 @ApiTags('media')
 @Controller('media')
 export class MediaController {
+  private readonly logger = new Logger(MediaController.name);
+
+  private static readonly UPLOAD_UNAVAILABLE_MESSAGE =
+    "We couldn't upload your file right now. Please try again in a moment.";
+
   constructor(private readonly s3Service: S3Service) {}
 
   @ApiBearerAuth()
@@ -51,11 +57,7 @@ export class MediaController {
       required: ['file'],
     },
   })
-  @UseInterceptors(
-    FileInterceptor('file', {
-      limits: { fileSize: 2 * 1024 * 1024 },
-    }),
-  )
+  @UseInterceptors(MediaUploadInterceptor)
   @ResponseMessage('File uploaded successfully')
   async upload(
     @UploadedFile() file: Express.Multer.File | undefined,
@@ -95,9 +97,15 @@ export class MediaController {
         originalName: file.originalname || 'file',
         folder,
       });
-    } catch {
-      throw new InternalServerErrorException(
-        'Upload failed. S3 may not be configured.',
+    } catch (error) {
+      // Log the real cause for operators (e.g. storage unreachable, missing
+      // bucket, bad credentials) but never leak internals to the client.
+      this.logger.error(
+        'Media upload failed',
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw new ServiceUnavailableException(
+        MediaController.UPLOAD_UNAVAILABLE_MESSAGE,
       );
     }
 
@@ -122,9 +130,23 @@ export class MediaController {
       throw new BadRequestException("Query parameter 'key' is required");
     }
 
-    const url = await this.s3Service.getPublicUrl(key, query.expiresIn);
+    let url: string | null;
+    try {
+      url = await this.s3Service.getPublicUrl(key, query.expiresIn);
+    } catch (error) {
+      this.logger.error(
+        `Failed to resolve media URL for key "${key}"`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw new ServiceUnavailableException(
+        MediaController.UPLOAD_UNAVAILABLE_MESSAGE,
+      );
+    }
+
     if (!url) {
-      throw new InternalServerErrorException('Failed to generate media URL');
+      throw new ServiceUnavailableException(
+        MediaController.UPLOAD_UNAVAILABLE_MESSAGE,
+      );
     }
 
     if (query.json) {
@@ -147,8 +169,10 @@ export class MediaController {
 
     const deleted = await this.s3Service.delete(key);
     if (!deleted) {
-      throw new InternalServerErrorException(
-        'Failed to delete file. S3 may not be configured or key may not exist.',
+      // The S3 layer already logs the underlying reason; keep the client
+      // message friendly and non-technical.
+      throw new ServiceUnavailableException(
+        "We couldn't remove that file right now. Please try again in a moment.",
       );
     }
 

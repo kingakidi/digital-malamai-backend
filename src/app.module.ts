@@ -48,6 +48,7 @@ import { WelcomeModule } from './welcome/welcome.module';
         otpConfig,
         messagingConfig,
         flutterwaveConfig,
+        mediaConfig,
         throttleConfig,
       ],
     }),

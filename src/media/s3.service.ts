@@ -9,7 +9,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ALLOWED_IMAGE_MIME_TYPES,
-  MAX_IMAGE_SIZE_BYTES,
   UPLOAD_FOLDERS,
   UploadFolder,
 } from './media.config';
@@ -30,6 +29,7 @@ export class S3Service {
   private readonly endpoint?: string;
   private readonly publicBaseUrl?: string;
   private readonly presignedExpirySeconds: number;
+  private readonly maxImageSizeBytes: number;
 
   constructor(private readonly configService: ConfigService) {
     this.bucketName = this.configService.get<string>('media.bucketName') ?? '';
@@ -38,6 +38,8 @@ export class S3Service {
     this.publicBaseUrl = this.configService.get<string>('media.publicBaseUrl');
     this.presignedExpirySeconds =
       this.configService.get<number>('media.presignedExpirySeconds') ?? 3600;
+    this.maxImageSizeBytes =
+      this.configService.get<number>('media.maxImageSizeBytes') ?? 2 * 1024 * 1024;
 
     if (this.isConfigured()) {
       this.client = new S3Client({
@@ -70,7 +72,7 @@ export class S3Service {
   }
 
   getMaxImageSizeBytes(): number {
-    return MAX_IMAGE_SIZE_BYTES;
+    return this.maxImageSizeBytes;
   }
 
   resolveUploadFolder(folder?: string): UploadFolder {

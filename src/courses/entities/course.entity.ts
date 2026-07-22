@@ -2,17 +2,11 @@ import {
   Column,
   CreateDateColumn,
   Entity,
-  JoinColumn,
-  ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import {
-  CommissionType,
-  CourseStatus,
-} from '../../common/types/payment.types';
-import { Partner } from '../../partners/entities/partner.entity';
+import { CourseStatus } from '../../common/types/payment.types';
 import { CourseEnrollment } from './course-enrollment.entity';
 import { CourseVideo } from './course-video.entity';
 
@@ -20,13 +14,6 @@ import { CourseVideo } from './course-video.entity';
 export class Course {
   @PrimaryGeneratedColumn('uuid')
   id: string;
-
-  @Column()
-  partnerId: string;
-
-  @ManyToOne(() => Partner, { nullable: false })
-  @JoinColumn({ name: 'partnerId' })
-  partner: Partner;
 
   @Column({ unique: true })
   slug: string;
@@ -51,12 +38,6 @@ export class Course {
 
   @Column({ type: 'enum', enum: CourseStatus, default: CourseStatus.DRAFT })
   status: CourseStatus;
-
-  @Column({ type: 'enum', enum: CommissionType, nullable: true })
-  partnerCommissionType: CommissionType | null;
-
-  @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
-  partnerCommissionValue: number | null;
 
   @OneToMany(() => CourseVideo, (video) => video.course)
   videos: CourseVideo[];

@@ -749,8 +749,8 @@ export class PaymentFulfillmentService {
       );
     }
 
-    const partner = course.partnerId
-      ? await this.partnersService.findOneEntity(course.partnerId)
+    const partner = user.partnerId
+      ? await this.partnersService.findOneEntity(user.partnerId)
       : null;
 
     let pendingDelivery:

@@ -266,12 +266,35 @@ export class PartnersService {
   async update(id: string, updatePartnerDto: UpdatePartnerDto): Promise<Partner> {
     const partner = await this.findOneEntity(id);
     const previousLogoUrl = partner.logoUrl;
+    const linkedUser = await this.userService.findPartnerLoginByPartnerId(id);
+    // Prefer the login account that currently shares the partner email
+    // (primary account). Team users also have the partner role.
+    const primaryLogin =
+      linkedUser &&
+      linkedUser.email.toLowerCase() === partner.email.toLowerCase()
+        ? linkedUser
+        : ((await this.userService.findByEmail(partner.email)) ?? linkedUser);
 
     if (updatePartnerDto.email !== undefined) {
       const normalizedEmail = updatePartnerDto.email.trim().toLowerCase();
-      await this.assertPartnerEmailAvailable(normalizedEmail, id);
-      await this.userService.assertEmailAvailable(normalizedEmail);
-      partner.email = normalizedEmail;
+
+      if (normalizedEmail !== partner.email.toLowerCase()) {
+        await this.assertPartnerEmailAvailable(normalizedEmail, id);
+        // The partner's own login account legitimately shares this email, so
+        // exclude it from the uniqueness check.
+        await this.userService.assertEmailAvailable(
+          normalizedEmail,
+          primaryLogin?.id,
+        );
+        partner.email = normalizedEmail;
+
+        // Keep the linked login account's email in sync so the partner can
+        // still sign in after an email change.
+        if (primaryLogin) {
+          primaryLogin.email = normalizedEmail;
+          await this.userService.save(primaryLogin);
+        }
+      }
     }
 
     const { email: _email, ...rest } = updatePartnerDto;

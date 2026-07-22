@@ -334,9 +334,6 @@ export class CourseWithEnrollmentResponseDto {
   @ApiProperty({ format: 'uuid' })
   id: string;
 
-  @ApiProperty({ format: 'uuid' })
-  partnerId: string;
-
   @ApiProperty()
   slug: string;
 
@@ -378,9 +375,6 @@ export class CourseResponseDto {
   @ApiProperty({ format: 'uuid' })
   id: string;
 
-  @ApiProperty({ format: 'uuid' })
-  partnerId: string;
-
   @ApiProperty()
   slug: string;
 
@@ -404,12 +398,6 @@ export class CourseResponseDto {
 
   @ApiProperty({ enum: CourseStatus })
   status: CourseStatus;
-
-  @ApiPropertyOptional({ enum: CommissionType, nullable: true })
-  partnerCommissionType: CommissionType | null;
-
-  @ApiPropertyOptional({ nullable: true })
-  partnerCommissionValue: number | null;
 
   @ApiProperty()
   createdAt: Date;
@@ -435,7 +423,10 @@ export class CourseVideoResponseDto {
   position: number;
 
   @ApiPropertyOptional({ nullable: true })
-  duration: string | null;
+  duration: number | null;
+
+  @ApiPropertyOptional({ nullable: true })
+  details: string | null;
 
   @ApiProperty()
   createdAt: Date;

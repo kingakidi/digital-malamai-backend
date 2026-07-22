@@ -24,8 +24,14 @@ export class CreateCourseVideoDto {
   @Min(0)
   position?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ default: 0, description: 'Lesson duration in minutes' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  duration?: number;
+
+  @ApiPropertyOptional({ description: 'Rich-text lesson notes' })
   @IsOptional()
   @IsString()
-  duration?: string;
+  details?: string | null;
 }

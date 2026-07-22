@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -18,12 +19,14 @@ import { JwtAuthGuard } from '../common/abac/guards/jwt-auth.guard';
 import { RoleGuard } from '../common/abac/guards/role.guard';
 import { ResponseMessage } from '../common/decorators/response-message.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { RoleName } from '../common/types/permission.types';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { PublishCourseDto } from './dto/publish-course.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
 import {
   ApiCreatedData,
   ApiOkData,
+  ApiOkNull,
   ApiOkPaginated,
   CourseResponseDto,
 } from '../common/swagger';
@@ -38,6 +41,7 @@ export class AdminCoursesController {
   constructor(private readonly coursesService: CoursesService) {}
 
   @Get()
+  @RequireRole(RoleName.SUPERADMIN, RoleName.ADMIN)
   @ApiOkPaginated(CourseResponseDto)
   @ResponseMessage('Courses retrieved successfully')
   findAll(@Query() query: PaginationQueryDto) {
@@ -45,6 +49,7 @@ export class AdminCoursesController {
   }
 
   @Get('slug/:slug')
+  @RequireRole(RoleName.SUPERADMIN, RoleName.ADMIN)
   @ApiOkData(CourseResponseDto)
   @ResponseMessage('Course retrieved successfully')
   findBySlug(@Param('slug') slug: string) {
@@ -52,6 +57,7 @@ export class AdminCoursesController {
   }
 
   @Get(':id')
+  @RequireRole(RoleName.SUPERADMIN, RoleName.ADMIN)
   @ApiOkData(CourseResponseDto)
   @ResponseMessage('Course retrieved successfully')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
@@ -85,6 +91,13 @@ export class AdminCoursesController {
   @ResponseMessage('Course disabled successfully')
   disable(@Param('id', ParseUUIDPipe) id: string) {
     return this.coursesService.disableCourse(id);
+  }
+
+  @Delete(':id')
+  @ApiOkNull()
+  @ResponseMessage('Course deleted successfully')
+  async remove(@Param('id', ParseUUIDPipe) id: string) {
+    await this.coursesService.removeCourse(id);
   }
 }
 

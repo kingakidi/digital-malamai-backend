@@ -471,8 +471,10 @@ export class UserService {
 
     if (dto.email !== undefined) {
       const normalizedEmail = dto.email.trim().toLowerCase();
-      await this.assertEmailAvailable(normalizedEmail, user.id);
-      user.email = normalizedEmail;
+      if (normalizedEmail !== user.email.toLowerCase()) {
+        await this.assertEmailAvailable(normalizedEmail, user.id);
+        user.email = normalizedEmail;
+      }
     }
 
     if (dto.partnerId !== undefined) {
@@ -648,8 +650,10 @@ export class UserService {
     }
     if (updateUserDto.email !== undefined) {
       const normalizedEmail = updateUserDto.email.trim().toLowerCase();
-      await this.assertEmailAvailable(normalizedEmail, user.id);
-      user.email = normalizedEmail;
+      if (normalizedEmail !== user.email.toLowerCase()) {
+        await this.assertEmailAvailable(normalizedEmail, user.id);
+        user.email = normalizedEmail;
+      }
     }
     if (updateUserDto.partnerId !== undefined) {
       user.partnerId = updateUserDto.partnerId;

@@ -5,11 +5,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { ReportFilterQueryDto } from '../common/dto/report-filter-query.dto';
 import { PaginatedResult } from '../common/interfaces/pagination.interface';
-import { OnboardingStatus } from '../common/types/onboarding-status.type';
 import { CourseStatus, PaidFor, PaymentStatus } from '../common/types/payment.types';
 import { RoleName } from '../common/types/permission.types';
 import { SortOrder } from '../common/types/sort-order.type';
@@ -18,10 +17,8 @@ import {
   getPaginationSkip,
 } from '../common/utils/pagination.util';
 import { generateUniqueSlug, slugify } from '../common/utils/slug.util';
-import { PartnersService } from '../partners/partners.service';
 import { PaymentTransaction } from '../payments/entities/payment-transaction.entity';
 import { resolveCoursePrice } from '../payments/utils/payment.util';
-import { UserService } from '../user/user.service';
 import { CreateCourseVideoDto } from './dto/create-course-video.dto';
 import { CreateCourseDto } from './dto/create-course.dto';
 import { PublishCourseDto } from './dto/publish-course.dto';
@@ -48,8 +45,6 @@ export class CoursesService {
     private readonly videosRepository: Repository<CourseVideo>,
     @InjectRepository(PaymentTransaction)
     private readonly transactionsRepository: Repository<PaymentTransaction>,
-    private readonly userService: UserService,
-    private readonly partnersService: PartnersService,
   ) {}
 
   // ─── Student reads ───────────────────────────────────────────────────────
@@ -77,61 +72,23 @@ export class CoursesService {
     });
   }
 
-  async findPublishedCoursesForStudent(
-    userId: string,
-    partnerId: string | null,
-  ): Promise<CourseWithEnrollmentView[]> {
-    await this.assertOnboardedStudent(userId);
-
-    if (!partnerId) {
-      throw new ForbiddenException('Student is not linked to a partner');
-    }
-
+  async findPublishedCoursesPublic(): Promise<CourseWithEnrollmentView[]> {
     const courses = await this.coursesRepository.find({
-      where: { partnerId, status: CourseStatus.PUBLISHED },
+      where: { status: CourseStatus.PUBLISHED },
       order: { createdAt: 'DESC' },
     });
 
-    if (courses.length === 0) {
-      return [];
-    }
-
-    const enrollments = await this.enrollmentsRepository.find({
-      where: { userId, courseId: In(courses.map((course) => course.id)) },
-    });
-    const enrollmentByCourseId = new Map(
-      enrollments.map((enrollment) => [enrollment.courseId, enrollment]),
-    );
-
-    return courses.map((course) =>
-      this.toCourseWithEnrollment(
-        course,
-        enrollmentByCourseId.get(course.id) ?? null,
-      ),
-    );
+    return courses.map((course) => this.toCourseWithEnrollment(course, null));
   }
 
-  async findPublishedCourseForStudent(
-    courseId: string,
-    userId: string,
-    partnerId: string | null,
-  ): Promise<CourseWithEnrollmentView> {
-    await this.assertOnboardedStudent(userId);
-
+  async findPublishedCoursePublic(courseId: string): Promise<CourseWithEnrollmentView> {
     const course = await this.findPublishedCourse(courseId);
-    this.assertCourseBelongsToPartner(course, partnerId);
-
-    const enrollment = await this.findEnrollment(userId, course.id);
-    return this.toCourseWithEnrollment(course, enrollment);
+    return this.toCourseWithEnrollment(course, null);
   }
 
-  async findPublishedCourseBySlugForStudent(
+  async findPublishedCourseBySlugPublic(
     slug: string,
-    userId: string,
-    partnerId: string | null,
   ): Promise<CourseWithEnrollmentView> {
-    await this.assertOnboardedStudent(userId);
-
     const course = await this.coursesRepository.findOne({
       where: { slug, status: CourseStatus.PUBLISHED },
     });
@@ -140,10 +97,7 @@ export class CoursesService {
       throw new NotFoundException(`Course with slug "${slug}" not found`);
     }
 
-    this.assertCourseBelongsToPartner(course, partnerId);
-
-    const enrollment = await this.findEnrollment(userId, course.id);
-    return this.toCourseWithEnrollment(course, enrollment);
+    return this.toCourseWithEnrollment(course, null);
   }
 
   async findEnrollmentsByUser(userId: string) {
@@ -180,25 +134,20 @@ export class CoursesService {
   // ─── Staff course CRUD ───────────────────────────────────────────────────
 
   async createCourse(dto: CreateCourseDto): Promise<Course> {
-    await this.partnersService.findOneEntity(dto.partnerId);
-
     const slug = await this.resolveUniqueSlug(
       dto.slug ?? dto.title,
       dto.slug ? slugify(dto.slug) : undefined,
     );
 
     const course = this.coursesRepository.create({
-      partnerId: dto.partnerId,
       slug,
       title: dto.title,
       description: dto.description ?? null,
-      thumbnailUrl: dto.thumbnailUrl ?? null,
+      thumbnailUrl: dto.thumbnailUrl,
       price: dto.price ?? 0,
       discount: dto.discount ?? 0,
       isFree: dto.isFree ?? false,
       status: CourseStatus.DRAFT,
-      partnerCommissionType: dto.partnerCommissionType ?? null,
-      partnerCommissionValue: dto.partnerCommissionValue ?? null,
     });
 
     return this.coursesRepository.save(course);
@@ -227,33 +176,6 @@ export class CoursesService {
     return buildPaginatedResult(items, total, query);
   }
 
-  async findCoursesForPartner(
-    partnerId: string,
-    query: PaginationQueryDto,
-  ): Promise<PaginatedResult<Course>> {
-    const skip = getPaginationSkip(query.page, query.limit);
-    const sortBy = COURSE_SORT_FIELDS.includes(query.sortBy ?? '')
-      ? query.sortBy!
-      : 'createdAt';
-
-    const qb = this.coursesRepository
-      .createQueryBuilder('course')
-      .where('course.partnerId = :partnerId', { partnerId });
-
-    if (query.search) {
-      qb.andWhere('(course.title LIKE :search OR course.slug LIKE :search)', {
-        search: `%${query.search}%`,
-      });
-    }
-
-    qb.orderBy(`course.${sortBy}`, query.sortOrder ?? SortOrder.DESC)
-      .skip(skip)
-      .take(query.limit);
-
-    const [items, total] = await qb.getManyAndCount();
-    return buildPaginatedResult(items, total, query);
-  }
-
   async findCourseById(id: string): Promise<Course> {
     const course = await this.coursesRepository.findOneBy({ id });
 
@@ -266,11 +188,6 @@ export class CoursesService {
 
   async updateCourse(id: string, dto: UpdateCourseDto): Promise<Course> {
     const course = await this.findCourseById(id);
-
-    if (dto.partnerId) {
-      await this.partnersService.findOneEntity(dto.partnerId);
-      course.partnerId = dto.partnerId;
-    }
 
     if (dto.title !== undefined) {
       course.title = dto.title;
@@ -294,14 +211,6 @@ export class CoursesService {
 
     if (dto.isFree !== undefined) {
       course.isFree = dto.isFree;
-    }
-
-    if (dto.partnerCommissionType !== undefined) {
-      course.partnerCommissionType = dto.partnerCommissionType;
-    }
-
-    if (dto.partnerCommissionValue !== undefined) {
-      course.partnerCommissionValue = dto.partnerCommissionValue;
     }
 
     if (dto.slug !== undefined) {
@@ -331,6 +240,33 @@ export class CoursesService {
     const course = await this.findCourseById(id);
     course.status = CourseStatus.DISABLED;
     return this.coursesRepository.save(course);
+  }
+
+  async removeCourse(id: string): Promise<void> {
+    const course = await this.findCourseById(id);
+
+    const enrollmentCount = await this.enrollmentsRepository.count({
+      where: { courseId: id },
+    });
+
+    if (enrollmentCount > 0) {
+      throw new ConflictException(
+        'Cannot delete a course that has enrollments. Disable it instead.',
+      );
+    }
+
+    const transactionCount = await this.transactionsRepository.count({
+      where: { courseId: id },
+    });
+
+    if (transactionCount > 0) {
+      throw new ConflictException(
+        'Cannot delete a course linked to payment transactions. Disable it instead.',
+      );
+    }
+
+    await this.videosRepository.delete({ courseId: id });
+    await this.coursesRepository.remove(course);
   }
 
   // ─── Course videos ───────────────────────────────────────────────────────
@@ -379,6 +315,7 @@ export class CoursesService {
       vimeoUrl: dto.vimeoUrl,
       position: dto.position ?? 0,
       duration: dto.duration ?? null,
+      details: dto.details ?? null,
     });
 
     return this.videosRepository.save(video);
@@ -426,7 +363,7 @@ export class CoursesService {
 
     if (
       scopedPartnerId &&
-      enrollment.course?.partnerId !== scopedPartnerId
+      enrollment.user?.partnerId !== scopedPartnerId
     ) {
       throw new NotFoundException(`Enrollment ${id} not found`);
     }
@@ -443,21 +380,6 @@ export class CoursesService {
     qb.skip(skip).take(query.limit);
     const [items, total] = await qb.getManyAndCount();
     return buildPaginatedResult(items, total, query);
-  }
-
-  async findCourseBySlugForPartner(
-    partnerId: string,
-    slug: string,
-  ): Promise<Course> {
-    const course = await this.coursesRepository.findOne({
-      where: { slug, partnerId },
-    });
-
-    if (!course) {
-      throw new NotFoundException(`Course with slug "${slug}" not found`);
-    }
-
-    return course;
   }
 
   async findCourseBySlugForStaff(slug: string): Promise<Course> {
@@ -600,7 +522,6 @@ export class CoursesService {
   ): CourseWithEnrollmentView {
     return {
       id: course.id,
-      partnerId: course.partnerId,
       slug: course.slug,
       title: course.title,
       description: course.description,
@@ -666,7 +587,7 @@ export class CoursesService {
 
     const partnerId = scopedPartnerId ?? query.partnerId;
     if (partnerId) {
-      qb.andWhere('course.partnerId = :partnerId', { partnerId });
+      qb.andWhere('user.partnerId = :partnerId', { partnerId });
     }
 
     if (query.courseId) {
@@ -754,26 +675,4 @@ export class CoursesService {
     return buildPaginatedResult(items, total, query);
   }
 
-  private async assertOnboardedStudent(userId: string): Promise<void> {
-    const user = await this.userService.findByIdWithRole(userId);
-
-    if (!user) {
-      throw new NotFoundException('Student not found');
-    }
-
-    if (user.onboardingStatus !== OnboardingStatus.ONBOARDED) {
-      throw new ForbiddenException(
-        'Complete onboarding before browsing or purchasing courses',
-      );
-    }
-  }
-
-  private assertCourseBelongsToPartner(
-    course: Course,
-    partnerId: string | null,
-  ): void {
-    if (!partnerId || course.partnerId !== partnerId) {
-      throw new NotFoundException('Course not found for your partner');
-    }
-  }
 }

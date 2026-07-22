@@ -125,22 +125,16 @@ export class PartnerPortalController {
   @ApiOkData(CourseResponseDto)
   @RequirePermission(PermissionResource.PARTNERS, PermissionAction.READ)
   @ResponseMessage('Partner course retrieved successfully')
-  findCourseBySlug(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('slug') slug: string,
-  ) {
-    return this.coursesService.findCourseBySlugForPartner(user.partnerId!, slug);
+  findCourseBySlug(@Param('slug') slug: string) {
+    return this.coursesService.findPublishedCourseBySlugPublic(slug);
   }
 
   @Get('courses')
-  @ApiOkPaginated(CourseResponseDto)
+  @ApiOkData(CourseResponseDto, { isArray: true })
   @RequirePermission(PermissionResource.PARTNERS, PermissionAction.READ)
   @ResponseMessage('Partner courses retrieved successfully')
-  findCourses(
-    @CurrentUser() user: AuthenticatedUser,
-    @Query() query: PaginationQueryDto,
-  ) {
-    return this.coursesService.findCoursesForPartner(user.partnerId!, query);
+  findCourses() {
+    return this.coursesService.findPublishedCoursesPublic();
   }
 
   @Get('students')

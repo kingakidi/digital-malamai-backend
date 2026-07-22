@@ -7,7 +7,6 @@ export interface CourseEnrollmentSummary {
 
 export interface CourseWithEnrollmentView {
   id: string;
-  partnerId: string;
   slug: string;
   title: string;
   description: string | null;
