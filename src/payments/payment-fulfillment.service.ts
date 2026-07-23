@@ -50,8 +50,8 @@ import {
   mergePaymentMetadata,
   normalizePaidFor,
   parsePaymentMetadata,
+  resolvePaidForFromSources,
   roundMoney,
-  tryResolvePaidFor,
 } from './utils/payment.util';
 
 export interface VerifyPaymentInput {
@@ -355,7 +355,10 @@ export class PaymentFulfillmentService {
       input.registrationFallback,
     );
 
-    const paidFor = tryResolvePaidFor(metadata.paidFor);
+    const paidFor = resolvePaidForFromSources({
+      metadataPaidFor: metadata.paidFor,
+      txRef: input.flutterwaveData.tx_ref,
+    });
 
     if (!paidFor) {
       throw new BadRequestException(
@@ -458,7 +461,14 @@ export class PaymentFulfillmentService {
       input.registrationFallback,
     );
 
-    const paidFor = normalizePaidFor(metadata.paidFor, input.forcedPaidFor);
+    const paidFor =
+      resolvePaidForFromSources({
+        metadataPaidFor: metadata.paidFor,
+        txRef: flutterwaveData.tx_ref,
+        forcedPaidFor: input.forcedPaidFor,
+      }) ?? normalizePaidFor(metadata.paidFor, input.forcedPaidFor);
+
+    metadata.paidFor = paidFor;
 
     const email = (
       metadata.email ??
@@ -466,13 +476,24 @@ export class PaymentFulfillmentService {
       input.registrationFallback?.email
     )?.toLowerCase();
 
-    if (!email) {
+    let user = email ? await this.userService.findByEmail(email) : null;
+
+    if (!user && metadata.userId) {
+      user = await this.userService.findByIdWithRole(metadata.userId);
+    }
+
+    if (!email && !user) {
+      throw new BadRequestException(
+        'Payment metadata must include email (or userId) to link the transaction',
+      );
+    }
+
+    const linkedEmail = (email ?? user?.email)?.toLowerCase();
+    if (!linkedEmail) {
       throw new BadRequestException(
         'Payment metadata must include email to link the transaction',
       );
     }
-
-    let user = await this.userService.findByEmail(email);
 
     if (paidFor === PaidFor.ONBOARDING) {
       if (user && user.role.name !== RoleName.STUDENT) {
@@ -496,7 +517,7 @@ export class PaymentFulfillmentService {
         user,
         flutterwaveData,
         metadata,
-        email,
+        linkedEmail,
         input.source,
         existing,
         input.registrationFallback,

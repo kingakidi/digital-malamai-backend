@@ -173,12 +173,6 @@ export class UserService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    if (user.role.name === RoleName.STUDENT) {
-      throw new BadRequestException(
-        'Students should change password via /students/change-password',
-      );
-    }
-
     const isMatch = await bcrypt.compare(currentPassword, user.password);
 
     if (!isMatch) {
