@@ -28,10 +28,14 @@ export interface PaymentMetadata {
   paidFor?: PaidFor | string;
   email?: string;
   courseId?: string;
+  /** Comma-separated course UUIDs for multi-course cart checkout */
+  courseIds?: string;
   partnerId?: string;
   accessCode?: string;
   fullName?: string;
   phone?: string;
+  /** Checkout meta — used as fallback when customer email is missing */
+  userId?: string;
 }
 
 export interface FlutterwaveVerifyData {

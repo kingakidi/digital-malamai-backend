@@ -4,6 +4,7 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { Express } from 'express';
 import { AppModule } from './app.module';
+import { isCorsOriginAllowed } from './config/cors.util';
 import { WelcomeService } from './welcome/welcome.service';
 
 async function bootstrap() {
@@ -14,14 +15,21 @@ async function bootstrap() {
   const swaggerPath = configService.get<string>('app.swaggerPath')!;
   const port = configService.get<number>('app.port')!;
   const corsOrigins = configService.get<string[]>('app.corsOrigins') ?? [];
+  const isDev = process.env.NODE_ENV !== 'production';
 
-  if (corsOrigins.length > 0) {
-    app.enableCors({
-      origin: corsOrigins,
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
-    });
-  }
+  app.enableCors({
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void,
+    ) => {
+      const allowed = isCorsOriginAllowed(origin, corsOrigins, {
+        allowLocalDev: isDev,
+      });
+      callback(null, allowed);
+    },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
 
   app.setGlobalPrefix(apiPrefix);
 

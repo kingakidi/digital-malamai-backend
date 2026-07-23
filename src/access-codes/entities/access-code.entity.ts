@@ -20,7 +20,7 @@ export class AccessCode {
   partnerId: string | null;
 
   @ManyToOne(() => Partner, { nullable: true })
-  @JoinColumn({ name: 'partnerId' })
+  @JoinColumn({ name: 'partnerId', foreignKeyConstraintName: 'FK_access_codes_partner' })
   partner: Partner | null;
 
   @Column({ length: 6 })

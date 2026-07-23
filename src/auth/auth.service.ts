@@ -94,11 +94,43 @@ export class AuthService {
   }
 
   changePassword(userId: string, dto: { currentPassword: string; newPassword: string }) {
-    return this.userService.changePasswordWithCurrent(
-      userId,
+    return this.changePasswordWithCredential(userId, dto);
+  }
+
+  private async changePasswordWithCredential(
+    userId: string,
+    dto: { currentPassword: string; newPassword: string },
+  ) {
+    const user = await this.userService.findByIdWithRole(userId);
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (user.password) {
+      return this.userService.changePasswordWithCurrent(
+        userId,
+        dto.currentPassword,
+        dto.newPassword,
+      );
+    }
+
+    const isValid = await this.studentsService.validateCredential(
+      user,
       dto.currentPassword,
-      dto.newPassword,
     );
+
+    if (!isValid) {
+      throw new UnauthorizedException(
+        'Current password or access code is incorrect',
+      );
+    }
+
+    await this.userService.setPassword(user.id, dto.newPassword, {
+      mustChangePassword: false,
+    });
+
+    return { message: 'Password changed successfully' };
   }
 
   async updateProfile(userId: string, dto: UpdateProfileDto) {

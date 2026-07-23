@@ -33,6 +33,7 @@ import { StudentsModule } from './students/students.module';
 import { UserModule } from './user/user.module';
 import { AdminModule } from './admin/admin.module';
 import { WelcomeModule } from './welcome/welcome.module';
+import { NewsletterModule } from './newsletter/newsletter.module';
 
 @Module({
   imports: [
@@ -55,12 +56,15 @@ import { WelcomeModule } from './welcome/welcome.module';
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => [
-        {
-          ttl: configService.get<number>('throttle.ttl') ?? 60_000,
-          limit: configService.get<number>('throttle.limit') ?? 100,
-        },
-      ],
+      useFactory: (configService: ConfigService) => ({
+        errorMessage: 'Too many requests',
+        throttlers: [
+          {
+            ttl: configService.get<number>('throttle.ttl') ?? 60_000,
+            limit: configService.get<number>('throttle.limit') ?? 100,
+          },
+        ],
+      }),
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -94,6 +98,7 @@ import { WelcomeModule } from './welcome/welcome.module';
     CoursesModule,
     PaymentsModule,
     AdminModule,
+    NewsletterModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

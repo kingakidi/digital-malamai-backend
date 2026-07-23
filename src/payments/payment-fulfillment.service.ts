@@ -23,6 +23,7 @@ import {
 } from '../common/types/payment.types';
 import { RoleName } from '../common/types/permission.types';
 import { CourseEnrollment } from '../courses/entities/course-enrollment.entity';
+import { Course } from '../courses/entities/course.entity';
 import { CoursesService } from '../courses/courses.service';
 import { MailService } from '../mail/mail.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -49,8 +50,8 @@ import {
   mergePaymentMetadata,
   normalizePaidFor,
   parsePaymentMetadata,
+  resolvePaidForFromSources,
   roundMoney,
-  tryResolvePaidFor,
 } from './utils/payment.util';
 
 export interface VerifyPaymentInput {
@@ -354,7 +355,10 @@ export class PaymentFulfillmentService {
       input.registrationFallback,
     );
 
-    const paidFor = tryResolvePaidFor(metadata.paidFor);
+    const paidFor = resolvePaidForFromSources({
+      metadataPaidFor: metadata.paidFor,
+      txRef: input.flutterwaveData.tx_ref,
+    });
 
     if (!paidFor) {
       throw new BadRequestException(
@@ -457,7 +461,14 @@ export class PaymentFulfillmentService {
       input.registrationFallback,
     );
 
-    const paidFor = normalizePaidFor(metadata.paidFor, input.forcedPaidFor);
+    const paidFor =
+      resolvePaidForFromSources({
+        metadataPaidFor: metadata.paidFor,
+        txRef: flutterwaveData.tx_ref,
+        forcedPaidFor: input.forcedPaidFor,
+      }) ?? normalizePaidFor(metadata.paidFor, input.forcedPaidFor);
+
+    metadata.paidFor = paidFor;
 
     const email = (
       metadata.email ??
@@ -465,13 +476,24 @@ export class PaymentFulfillmentService {
       input.registrationFallback?.email
     )?.toLowerCase();
 
-    if (!email) {
+    let user = email ? await this.userService.findByEmail(email) : null;
+
+    if (!user && metadata.userId) {
+      user = await this.userService.findByIdWithRole(metadata.userId);
+    }
+
+    if (!email && !user) {
+      throw new BadRequestException(
+        'Payment metadata must include email (or userId) to link the transaction',
+      );
+    }
+
+    const linkedEmail = (email ?? user?.email)?.toLowerCase();
+    if (!linkedEmail) {
       throw new BadRequestException(
         'Payment metadata must include email to link the transaction',
       );
     }
-
-    let user = await this.userService.findByEmail(email);
 
     if (paidFor === PaidFor.ONBOARDING) {
       if (user && user.role.name !== RoleName.STUDENT) {
@@ -495,7 +517,7 @@ export class PaymentFulfillmentService {
         user,
         flutterwaveData,
         metadata,
-        email,
+        linkedEmail,
         input.source,
         existing,
         input.registrationFallback,
@@ -729,15 +751,62 @@ export class PaymentFulfillmentService {
     existing: PaymentTransaction | null,
   ) {
     if (user.onboardingStatus !== OnboardingStatus.ONBOARDED) {
-      throw new BadRequestException('Student must complete onboarding before purchasing courses');
+      throw new BadRequestException(
+        'Student must complete onboarding before purchasing courses',
+      );
     }
 
-    const courseId = metadata.courseId;
+    const courseIds = this.resolveCourseIds(metadata);
 
-    if (!courseId) {
-      throw new BadRequestException('Payment metadata must include courseId for course payments');
+    if (courseIds.length === 0) {
+      throw new BadRequestException(
+        'Payment metadata must include courseId for course payments',
+      );
     }
 
+    if (courseIds.length === 1) {
+      return this.fulfillSingleCourse(
+        user,
+        flutterwaveData,
+        metadata,
+        courseIds[0],
+        source,
+        existing,
+      );
+    }
+
+    return this.fulfillCartCourses(
+      user,
+      flutterwaveData,
+      metadata,
+      courseIds,
+      source,
+      existing,
+    );
+  }
+
+  private resolveCourseIds(metadata: PaymentMetadata): string[] {
+    const fromList =
+      metadata.courseIds
+        ?.split(',')
+        .map((id) => id.trim())
+        .filter(Boolean) ?? [];
+
+    if (fromList.length > 0) {
+      return [...new Set(fromList)];
+    }
+
+    return metadata.courseId ? [metadata.courseId] : [];
+  }
+
+  private async fulfillSingleCourse(
+    user: User,
+    flutterwaveData: FlutterwaveVerifyData,
+    metadata: PaymentMetadata,
+    courseId: string,
+    source: 'api' | 'webhook' | 'sync',
+    existing: PaymentTransaction | null,
+  ) {
     const course = await this.coursesService.findPublishedCourse(courseId);
     const existingEnrollment = await this.coursesService.findEnrollment(
       user.id,
@@ -783,6 +852,8 @@ export class PaymentFulfillmentService {
         return {
           ...this.serializeTransaction(transaction),
           enrollmentId: existingEnrollment?.id ?? null,
+          courseIds: [course.id],
+          enrollmentIds: existingEnrollment?.id ? [existingEnrollment.id] : [],
         };
       }
 
@@ -814,6 +885,8 @@ export class PaymentFulfillmentService {
       return {
         ...this.serializeTransaction(transaction),
         enrollmentId: enrollment.id,
+        courseIds: [course.id],
+        enrollmentIds: [enrollment.id],
       };
     });
 
@@ -822,6 +895,145 @@ export class PaymentFulfillmentService {
         pendingDelivery.user,
         pendingDelivery.courseId,
         pendingDelivery.courseTitle,
+      );
+    }
+
+    return result;
+  }
+
+  private async fulfillCartCourses(
+    user: User,
+    flutterwaveData: FlutterwaveVerifyData,
+    metadata: PaymentMetadata,
+    courseIds: string[],
+    source: 'api' | 'webhook' | 'sync',
+    existing: PaymentTransaction | null,
+  ) {
+    const courses: Course[] = [];
+    for (const courseId of courseIds) {
+      courses.push(await this.coursesService.findPublishedCourse(courseId));
+    }
+
+    const alreadyEnrolledIds: string[] = [];
+    for (const course of courses) {
+      const enrollment = await this.coursesService.findEnrollment(
+        user.id,
+        course.id,
+      );
+      if (enrollment) {
+        alreadyEnrolledIds.push(course.id);
+      }
+    }
+
+    // New payment (no existing tx row) must not charge again for owned courses.
+    if (!existing && alreadyEnrolledIds.length > 0) {
+      if (alreadyEnrolledIds.length === courses.length) {
+        throw new ConflictException(
+          'You are already enrolled in all courses in this payment',
+        );
+      }
+      throw new ConflictException(
+        'You are already enrolled in one or more courses in this cart. Remove them and try again.',
+      );
+    }
+
+    const expectedAmount = courses.reduce(
+      (sum, course) =>
+        sum + this.coursesService.getExpectedCourseAmount(course),
+      0,
+    );
+    const paidAmount = Number(flutterwaveData.amount);
+
+    if (paidAmount + 0.001 < expectedAmount) {
+      throw new BadRequestException(
+        `Paid amount ${paidAmount} is less than expected cart total ${expectedAmount}`,
+      );
+    }
+
+    const partner = user.partnerId
+      ? await this.partnersService.findOneEntity(user.partnerId)
+      : null;
+
+    const pendingDeliveries: Array<{
+      user: User;
+      courseId: string;
+      courseTitle: string;
+    }> = [];
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      const transaction = await this.saveTransaction(manager, {
+        existing,
+        flutterwaveData,
+        paidFor: PaidFor.COURSE,
+        user,
+        partner,
+        courseId: courses[0]?.id ?? null,
+        partnerCut: 0,
+        platformCut: paidAmount,
+        metadata: {
+          ...metadata,
+          courseId: courses[0]?.id,
+          courseIds: courseIds.join(','),
+        },
+        source,
+      });
+
+      if (transaction.fulfillmentCompleted) {
+        return {
+          ...this.serializeTransaction(transaction),
+          enrollmentId: null,
+          courseIds,
+          enrollmentIds: [] as string[],
+        };
+      }
+
+      const enrollmentIds: string[] = [];
+
+      for (const course of courses) {
+        let enrollment = await this.coursesService.findEnrollment(
+          user.id,
+          course.id,
+        );
+
+        if (!enrollment) {
+          enrollment = manager.create(CourseEnrollment, {
+            userId: user.id,
+            courseId: course.id,
+            paymentTransactionId: transaction.id,
+            enrolledAt: new Date(),
+            paymentStatus: PaymentStatus.SUCCESS,
+            unlockedAt: new Date(),
+          });
+          await manager.save(enrollment);
+
+          if (source !== 'sync') {
+            pendingDeliveries.push({
+              user,
+              courseId: course.id,
+              courseTitle: course.title,
+            });
+          }
+        }
+
+        enrollmentIds.push(enrollment.id);
+      }
+
+      transaction.fulfillmentCompleted = true;
+      await manager.save(transaction);
+
+      return {
+        ...this.serializeTransaction(transaction),
+        enrollmentId: enrollmentIds[0] ?? null,
+        courseIds,
+        enrollmentIds,
+      };
+    });
+
+    for (const delivery of pendingDeliveries) {
+      await this.deliverCourseAccess(
+        delivery.user,
+        delivery.courseId,
+        delivery.courseTitle,
       );
     }
 
@@ -948,9 +1160,21 @@ export class PaymentFulfillmentService {
     }
   }
 
-  private async deliverCourseAccess(user: User, courseId: string, courseTitle: string) {
+  private async deliverCourseAccess(
+    user: User,
+    courseId: string,
+    courseTitle: string,
+  ): Promise<{ emailSent: boolean; whatsappSent: boolean }> {
     const videos = await this.coursesService.getCourseVideos(courseId);
-    const links = videos.map((video) => `${video.title}: ${video.vimeoUrl}`).join('\n');
+    const links = videos
+      .map((video) => `${video.title}: ${video.vimeoUrl}`)
+      .join('\n');
+
+    let emailSent = false;
+    let whatsappSent = false;
+    const whatsappEnabled = (
+      await this.settingsService.getCourseWhatsappDelivery()
+    ).enabled;
 
     try {
       await this.mailService.sendTemplateMail(user.email, 'course-delivery', {
@@ -958,12 +1182,14 @@ export class PaymentFulfillmentService {
         courseTitle,
         links,
       });
+      emailSent = true;
 
-      if (user.phone) {
-        await this.phoneMessagingService.sendMessage(
-          user.phone,
-          `Your course "${courseTitle}" is ready. Check your email for video links.`,
-        );
+      if (whatsappEnabled && user.phone) {
+        const whatsappBody = links
+          ? `Your course "${courseTitle}" is ready.\n\n${links}`
+          : `Your course "${courseTitle}" is ready. Check your email for video links.`;
+        await this.phoneMessagingService.sendMessage(user.phone, whatsappBody);
+        whatsappSent = true;
       }
 
       await this.notificationsService.log({
@@ -983,6 +1209,47 @@ export class PaymentFulfillmentService {
         status: NotificationStatus.FAILED,
       });
     }
+
+    return { emailSent, whatsappSent };
+  }
+
+  async resendCourseAccess(userId: string, courseId: string) {
+    const enrollment = await this.coursesService.findEnrollment(
+      userId,
+      courseId,
+    );
+    if (!enrollment) {
+      throw new ForbiddenException(
+        'You must be enrolled in this course to receive lesson links',
+      );
+    }
+
+    const user = await this.userService.findByIdWithRole(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const course = await this.coursesService.findPublishedCourse(courseId);
+    const delivery = await this.deliverCourseAccess(
+      user,
+      course.id,
+      course.title,
+    );
+
+    if (!delivery.emailSent) {
+      throw new BadRequestException(
+        'Could not send course links. Please try again shortly.',
+      );
+    }
+
+    return {
+      courseId: course.id,
+      courseTitle: course.title,
+      delivery: {
+        email: delivery.emailSent,
+        whatsapp: delivery.whatsappSent,
+      },
+    };
   }
 
   private serializeTransaction(transaction: PaymentTransaction) {

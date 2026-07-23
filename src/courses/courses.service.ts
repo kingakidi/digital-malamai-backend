@@ -170,6 +170,10 @@ export class CoursesService {
       );
     }
 
+    if (query.status) {
+      qb.andWhere('course.status = :status', { status: query.status });
+    }
+
     qb.orderBy(`course.${sortBy}`, query.sortOrder ?? SortOrder.DESC)
       .skip(skip)
       .take(query.limit);
@@ -589,6 +593,7 @@ export class CoursesService {
     const qb = this.enrollmentsRepository
       .createQueryBuilder('enrollment')
       .leftJoinAndSelect('enrollment.user', 'user')
+      .leftJoinAndSelect('user.partner', 'partner')
       .leftJoinAndSelect('enrollment.course', 'course');
 
     const partnerId = scopedPartnerId ?? query.partnerId;

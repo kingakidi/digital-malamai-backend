@@ -7,5 +7,6 @@ export const HTTP_STATUS_MESSAGES: Record<number, string> = {
   [HttpStatus.NOT_FOUND]: 'Not Found',
   [HttpStatus.CONFLICT]: 'Conflict',
   [HttpStatus.UNPROCESSABLE_ENTITY]: 'Unprocessable Entity',
+  [HttpStatus.TOO_MANY_REQUESTS]: 'Too many requests',
   [HttpStatus.INTERNAL_SERVER_ERROR]: 'Internal Server Error',
 };

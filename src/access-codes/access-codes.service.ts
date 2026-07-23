@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { PaginatedResult } from '../common/interfaces/pagination.interface';
 import { SortOrder } from '../common/types/sort-order.type';
@@ -21,6 +21,7 @@ import { AccessCode } from './entities/access-code.entity';
 import {
   AccessCodeStats,
   SerializedAccessCode,
+  SerializedAccessCodeDetail,
 } from './types/serialized-access-code.type';
 
 const MAX_SINGLE_INSERT_ATTEMPTS = 10;
@@ -110,6 +111,8 @@ export class AccessCodesService {
       });
     }
 
+    this.applyStatusFilter(qb, query.status);
+
     qb.orderBy(`accessCode.${sortBy}`, query.sortOrder ?? SortOrder.DESC)
       .skip(skip)
       .take(query.limit);
@@ -134,15 +137,18 @@ export class AccessCodesService {
       ? query.sortBy!
       : 'createdAt';
 
+    // Partners no longer own code inventories. Show codes used by their students.
     const qb = this.accessCodesRepository
       .createQueryBuilder('accessCode')
-      .leftJoinAndSelect('accessCode.student', 'student')
-      .where('accessCode.partnerId = :partnerId', { partnerId });
+      .innerJoinAndSelect('accessCode.student', 'student')
+      .where('accessCode.isUsed = :isUsed', { isUsed: true })
+      .andWhere('student.partnerId = :partnerId', { partnerId });
 
     if (query.search) {
-      qb.andWhere('accessCode.code LIKE :search', {
-        search: `%${query.search}%`,
-      });
+      qb.andWhere(
+        '(accessCode.code LIKE :search OR student.firstName LIKE :search OR student.lastName LIKE :search OR student.email LIKE :search)',
+        { search: `%${query.search}%` },
+      );
     }
 
     qb.orderBy(`accessCode.${sortBy}`, query.sortOrder ?? SortOrder.DESC)
@@ -156,6 +162,39 @@ export class AccessCodesService {
       total,
       query,
     );
+  }
+
+  async findOne(id: string): Promise<SerializedAccessCodeDetail> {
+    const accessCode = await this.accessCodesRepository.findOne({
+      where: { id },
+      relations: ['student', 'partner'],
+    });
+
+    if (!accessCode) {
+      throw new NotFoundException('Access code not found');
+    }
+
+    return this.serializeDetail(accessCode);
+  }
+
+  async findOneForPartner(
+    partnerId: string,
+    id: string,
+  ): Promise<SerializedAccessCodeDetail> {
+    const accessCode = await this.accessCodesRepository
+      .createQueryBuilder('accessCode')
+      .leftJoinAndSelect('accessCode.student', 'student')
+      .leftJoinAndSelect('accessCode.partner', 'partner')
+      .where('accessCode.id = :id', { id })
+      .andWhere('accessCode.isUsed = :isUsed', { isUsed: true })
+      .andWhere('student.partnerId = :partnerId', { partnerId })
+      .getOne();
+
+    if (!accessCode) {
+      throw new NotFoundException('Access code not found');
+    }
+
+    return this.serializeDetail(accessCode);
   }
 
   async getStats(): Promise<AccessCodeStats> {
@@ -183,25 +222,18 @@ export class AccessCodesService {
   async getStatsForPartner(partnerId: string): Promise<AccessCodeStats> {
     await this.partnersService.findOneEntity(partnerId);
 
-    const now = new Date();
-
-    const [total, used, expired] = await Promise.all([
-      this.accessCodesRepository.count({ where: { partnerId } }),
-      this.accessCodesRepository.count({ where: { partnerId, isUsed: true } }),
-      this.accessCodesRepository
-        .createQueryBuilder('accessCode')
-        .where('accessCode.partnerId = :partnerId', { partnerId })
-        .andWhere('accessCode.isUsed = :isUsed', { isUsed: false })
-        .andWhere('accessCode.expiresAt IS NOT NULL')
-        .andWhere('accessCode.expiresAt < :now', { now })
-        .getCount(),
-    ]);
+    const used = await this.accessCodesRepository
+      .createQueryBuilder('accessCode')
+      .innerJoin('accessCode.student', 'student')
+      .where('accessCode.isUsed = :isUsed', { isUsed: true })
+      .andWhere('student.partnerId = :partnerId', { partnerId })
+      .getCount();
 
     return {
-      total,
+      total: used,
       used,
-      unused: total - used,
-      expired,
+      unused: 0,
+      expired: 0,
     };
   }
 
@@ -404,6 +436,34 @@ export class AccessCodesService {
     );
   }
 
+  private applyStatusFilter(
+    qb: SelectQueryBuilder<AccessCode>,
+    status?: string,
+  ): void {
+    if (!status) return;
+
+    const now = new Date();
+
+    if (status === 'used') {
+      qb.andWhere('accessCode.isUsed = :isUsed', { isUsed: true });
+      return;
+    }
+
+    if (status === 'expired') {
+      qb.andWhere('accessCode.isUsed = :isUsed', { isUsed: false })
+        .andWhere('accessCode.expiresAt IS NOT NULL')
+        .andWhere('accessCode.expiresAt < :now', { now });
+      return;
+    }
+
+    if (status === 'available') {
+      qb.andWhere('accessCode.isUsed = :isUsed', { isUsed: false }).andWhere(
+        '(accessCode.expiresAt IS NULL OR accessCode.expiresAt >= :now)',
+        { now },
+      );
+    }
+  }
+
   private serialize(accessCode: AccessCode): SerializedAccessCode {
     return {
       id: accessCode.id,
@@ -420,6 +480,27 @@ export class AccessCodesService {
             email: accessCode.student.email,
           }
         : null,
+    };
+  }
+
+  private serializeDetail(accessCode: AccessCode): SerializedAccessCodeDetail {
+    const partner = accessCode.partner;
+
+    return {
+      ...this.serialize(accessCode),
+      partner: partner
+        ? {
+            id: partner.id,
+            firstName: partner.firstName,
+            lastName: partner.lastName,
+            logoUrl: partner.logoUrl ?? null,
+          }
+        : {
+            id: '',
+            firstName: 'System',
+            lastName: '',
+            logoUrl: null,
+          },
     };
   }
 }

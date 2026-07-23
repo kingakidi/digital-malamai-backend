@@ -36,6 +36,13 @@ export class AdminReportsController {
     return this.studentsService.findAllStudents(query);
   }
 
+  @Get('students/:id')
+  @ApiOkData(UserResponseDto)
+  @ResponseMessage('Student retrieved successfully')
+  findStudent(@Param('id', ParseUUIDPipe) id: string) {
+    return this.studentsService.findStudentById(id);
+  }
+
   @Put('students/:id')
   @ApiOkData(UserResponseDto)
   @ResponseMessage('Student account updated successfully')

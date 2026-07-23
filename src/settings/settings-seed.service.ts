@@ -16,6 +16,20 @@ export class SettingsSeedService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    await this.ensureOnboardingFee();
+    await this.ensureFlag(
+      SYSTEM_SETTING_KEYS.COURSE_LESSON_WATCH_IN_APP,
+      true,
+      'course lesson in-app watch',
+    );
+    await this.ensureFlag(
+      SYSTEM_SETTING_KEYS.COURSE_WHATSAPP_DELIVERY,
+      true,
+      'course WhatsApp delivery',
+    );
+  }
+
+  private async ensureOnboardingFee(): Promise<void> {
     const existing = await this.settingsRepository.findOneBy({
       key: SYSTEM_SETTING_KEYS.ONBOARDING_FEE,
     });
@@ -37,6 +51,29 @@ export class SettingsSeedService implements OnModuleInit {
 
     this.logger.log(
       `Seeded default onboarding fee: ${currency} ${defaultAmount}`,
+    );
+  }
+
+  private async ensureFlag(
+    key: string,
+    enabled: boolean,
+    label: string,
+  ): Promise<void> {
+    const existing = await this.settingsRepository.findOneBy({ key });
+    if (existing) {
+      return;
+    }
+
+    await this.settingsRepository.save(
+      this.settingsRepository.create({
+        key,
+        amount: enabled ? 1 : 0,
+        currency: 'FLG',
+      }),
+    );
+
+    this.logger.log(
+      `Seeded ${label}: ${enabled ? 'enabled' : 'disabled'}`,
     );
   }
 }

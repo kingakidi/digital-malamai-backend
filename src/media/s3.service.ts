@@ -1,11 +1,18 @@
 import {
+  CreateBucketCommand,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ALLOWED_FILE_TYPES,
@@ -21,22 +28,27 @@ import {
   isLikelyS3Key,
 } from './utils/extract-s3-key.util';
 
-/**
- * Nest port of Fileam `src/config/s3.ts` + `mediaUploadService.ts`.
- * View/serve always uses GetObject presigned URLs (no public-base-url shortcut).
- */
 @Injectable()
-export class S3Service {
+export class S3Service implements OnModuleInit {
+  private readonly logger = new Logger(S3Service.name);
   private readonly client: S3Client | null;
   private readonly bucketName: string;
   private readonly region: string;
   private readonly endpoint?: string;
+  private readonly bucketUrl?: string;
+  private readonly forcePathStyle: boolean;
   private readonly presignedExpirySeconds: number;
+  private bucketReady = false;
+  private ensureBucketPromise: Promise<void> | null = null;
 
   constructor(private readonly configService: ConfigService) {
     this.bucketName = this.configService.get<string>('media.bucketName') ?? '';
     this.region = this.configService.get<string>('media.region') ?? 'us-east-1';
     this.endpoint = this.configService.get<string>('media.endpoint');
+    this.bucketUrl =
+      this.configService.get<string>('media.bucketUrl') || undefined;
+    this.forcePathStyle =
+      this.configService.get<boolean>('media.forcePathStyle') ?? true;
     this.presignedExpirySeconds =
       this.configService.get<number>('media.presignedExpirySeconds') ??
       DEFAULT_PRESIGNED_EXPIRY_SECONDS;
@@ -51,15 +63,27 @@ export class S3Service {
             this.configService.get<string>('media.secretAccessKey') ?? '',
         },
         ...(this.getBaseEndpoint() && { endpoint: this.getBaseEndpoint() }),
-        // Fileam always sets forcePathStyle: true (env flag is ignored for the client).
-        forcePathStyle: true,
+        forcePathStyle: this.forcePathStyle,
       });
     } else {
       this.client = null;
     }
   }
 
-  /** Fileam `validateS3Config` (silent boolean; errors surface via API messages). */
+  async onModuleInit(): Promise<void> {
+    if (!this.isConfigured() || !this.client) {
+      return;
+    }
+
+    try {
+      await this.ensureBucketExists();
+    } catch (error) {
+      this.logger.warn(
+        `Could not ensure S3 bucket "${this.bucketName}" on startup: ${formatS3Error(error, this.bucketName)}. Will retry on upload.`,
+      );
+    }
+  }
+
   isConfigured(): boolean {
     return Boolean(
       this.configService.get<string>('media.accessKeyId') &&
@@ -95,7 +119,6 @@ export class S3Service {
     return UPLOAD_FOLDERS.MEDIA;
   }
 
-  /** Fileam `generateFileKey` */
   generateFileKey(folder: string, filename: string): string {
     const timestamp = Date.now();
     const randomString = Math.random().toString(36).substring(2, 15);
@@ -105,12 +128,24 @@ export class S3Service {
     return `${folder}/${nameWithoutExt}-${timestamp}-${randomString}.${extension}`;
   }
 
-  /** Fileam `generateS3Url` */
   generateS3Url(key: string): string {
-    if (this.endpoint) {
-      return `${this.endpoint.replace(/\/+$/, '')}/${key}`;
+    const normalizedKey = key.replace(/^\/+/, '');
+    const publicBase = (this.bucketUrl || this.endpoint || '')
+      .trim()
+      .replace(/\/+$/, '');
+
+    if (!publicBase) {
+      throw new InternalServerErrorException(
+        'S3_BUCKET_URL or S3_ENDPOINT must be set for media URLs',
+      );
     }
-    return `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${key}`;
+
+    // Contabo / MinIO path-style: https://host/bucket/key
+    if (this.forcePathStyle && this.bucketName) {
+      return `${publicBase}/${this.bucketName}/${normalizedKey}`;
+    }
+
+    return `${publicBase}/${normalizedKey}`;
   }
 
   extractKeyFromUrl(url: string | null | undefined): string | null {
@@ -124,7 +159,6 @@ export class S3Service {
     return isLikelyS3Key(value);
   }
 
-  /** Fileam `uploadToS3` */
   async upload(params: {
     buffer: Buffer;
     mimetype: string;
@@ -135,6 +169,8 @@ export class S3Service {
       return null;
     }
 
+    await this.ensureBucketExists();
+
     const folder = this.resolveUploadFolder(params.folder);
     const key = this.generateFileKey(folder, params.originalName || 'file');
     const command = new PutObjectCommand({
@@ -144,14 +180,86 @@ export class S3Service {
       ContentType: params.mimetype || 'application/octet-stream',
     });
 
-    await this.client.send(command);
+    try {
+      await this.client.send(command);
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        this.bucketReady = false;
+        await this.ensureBucketExists();
+        try {
+          await this.client.send(command);
+          return {
+            key,
+            url: this.generateS3Url(key),
+          };
+        } catch (retryError) {
+          const detail = formatS3Error(retryError, this.bucketName);
+          this.logger.error(
+            `S3 PutObject failed after bucket ensure (bucket=${this.bucketName}, key=${key}): ${detail}`,
+          );
+          throw new InternalServerErrorException(`S3 upload failed: ${detail}`);
+        }
+      }
+
+      const detail = formatS3Error(error, this.bucketName);
+      this.logger.error(
+        `S3 PutObject failed (bucket=${this.bucketName}, key=${key}): ${detail}`,
+      );
+      throw new InternalServerErrorException(`S3 upload failed: ${detail}`);
+    }
+
     return {
       key,
       url: this.generateS3Url(key),
     };
   }
 
-  /** Fileam `deleteFromS3` */
+  private async ensureBucketExists(): Promise<void> {
+    if (!this.client || !this.bucketName || this.bucketReady) {
+      return;
+    }
+
+    if (this.ensureBucketPromise) {
+      return this.ensureBucketPromise;
+    }
+
+    this.ensureBucketPromise = (async () => {
+      try {
+        await this.client!.send(
+          new HeadBucketCommand({ Bucket: this.bucketName }),
+        );
+        this.bucketReady = true;
+        return;
+      } catch (error) {
+        if (!isNotFoundError(error)) {
+          throw error;
+        }
+      }
+
+      this.logger.log(
+        `S3 bucket "${this.bucketName}" not found — creating it…`,
+      );
+
+      try {
+        await this.client!.send(
+          new CreateBucketCommand({ Bucket: this.bucketName }),
+        );
+        this.logger.log(`S3 bucket "${this.bucketName}" created`);
+        this.bucketReady = true;
+      } catch (error) {
+        if (isBucketAlreadyExistsError(error)) {
+          this.bucketReady = true;
+          return;
+        }
+        throw error;
+      }
+    })().finally(() => {
+      this.ensureBucketPromise = null;
+    });
+
+    return this.ensureBucketPromise;
+  }
+
   async delete(key: string): Promise<boolean> {
     if (!this.isConfigured() || !this.client || !key.trim()) {
       return false;
@@ -169,7 +277,6 @@ export class S3Service {
     }
   }
 
-  /** Fileam `getPresignedUrl` — used for both `/view` redirect and `/presigned`. */
   async getPresignedUrl(
     key: string,
     expiresInSeconds: number = this.presignedExpirySeconds,
@@ -194,12 +301,11 @@ export class S3Service {
   private getExtractKeyOptions(): ExtractS3KeyOptions {
     return {
       bucketName: this.bucketName,
-      endpoint: this.endpoint,
+      endpoint: this.bucketUrl || this.endpoint,
       region: this.region,
     };
   }
 
-  /** Fileam `getBaseEndpoint` */
   private getBaseEndpoint(): string | undefined {
     if (!this.endpoint) {
       return undefined;
@@ -211,4 +317,84 @@ export class S3Service {
 
     return this.endpoint;
   }
+}
+
+function isNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const err = error as {
+    name?: string;
+    Code?: string;
+    code?: string;
+    $metadata?: { httpStatusCode?: number };
+  };
+
+  const status = err.$metadata?.httpStatusCode;
+  const code = (err.Code ?? err.code ?? err.name ?? '').toString();
+
+  return status === 404 || /notfound|nosuchbucket/i.test(code);
+}
+
+function isBucketAlreadyExistsError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const err = error as {
+    name?: string;
+    Code?: string;
+    code?: string;
+    $metadata?: { httpStatusCode?: number };
+  };
+
+  const status = err.$metadata?.httpStatusCode;
+  const code = (err.Code ?? err.code ?? err.name ?? '').toString();
+
+  return (
+    status === 409 ||
+    /bucketalreadyownedbyyou|bucketalreadyexists/i.test(code)
+  );
+}
+
+function formatS3Error(error: unknown, bucketName: string): string {
+  if (!error || typeof error !== 'object') {
+    return String(error);
+  }
+
+  const err = error as {
+    name?: string;
+    message?: string;
+    Code?: string;
+    code?: string;
+    $metadata?: { httpStatusCode?: number; requestId?: string };
+  };
+
+  const status = err.$metadata?.httpStatusCode;
+  const code = err.Code ?? err.code ?? err.name;
+  const message = err.message?.trim();
+  const requestId = err.$metadata?.requestId;
+
+  const parts: string[] = [];
+  if (status) {
+    parts.push(`HTTP ${status}`);
+  }
+  if (code && code !== 'UnknownError') {
+    parts.push(String(code));
+  }
+  if (message && message !== 'UnknownError') {
+    parts.push(message);
+  } else if (status === 404) {
+    parts.push(
+      `bucket "${bucketName}" not found — create it in Contabo Object Storage`,
+    );
+  } else if (!parts.length) {
+    parts.push(message || 'Unknown S3 error');
+  }
+  if (requestId) {
+    parts.push(`requestId=${requestId}`);
+  }
+
+  return parts.join(' | ');
 }

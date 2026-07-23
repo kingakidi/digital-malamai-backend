@@ -29,13 +29,6 @@ import { UPLOAD_FOLDERS } from './media.config';
 import { MediaUploadInterceptor } from './media-upload.interceptor';
 import { S3Service } from './s3.service';
 
-/**
- * Nest port of Fileam `mediaUploadController` + `mediaRoutes`:
- * - GET  /media/view       public redirect to presigned GetObject URL
- * - GET  /media/presigned  auth JSON `{ url }`
- * - POST /media/upload     auth multipart → `{ url, key }` (url = view proxy)
- * - DELETE /media          auth delete by key
- */
 @ApiTags('media')
 @Controller('media')
 export class MediaController {
@@ -106,7 +99,6 @@ export class MediaController {
       );
     }
 
-    // Fileam returns the API view proxy URL, not the raw S3 URL.
     const origin = `${req.protocol}://${req.get('host') ?? ''}`;
     const apiPrefix = req.originalUrl.split('/media')[0] ?? '';
     const url = `${origin}${apiPrefix}/media/view?key=${encodeURIComponent(result.key)}`;
@@ -117,7 +109,7 @@ export class MediaController {
     };
   }
 
-  /** Public — Fileam `viewMedia`: always 302 to a GetObject presigned URL. */
+  /** Public 302 to a GetObject presigned URL. */
   @Get('view')
   async view(
     @Query() query: MediaKeyQueryDto,
@@ -140,7 +132,7 @@ export class MediaController {
     return undefined;
   }
 
-  /** Auth — Fileam `getPresignedUrlForView`: JSON `{ url }`. */
+  /** Auth JSON `{ url }` for direct GetObject access. */
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Get('presigned')

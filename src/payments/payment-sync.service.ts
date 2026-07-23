@@ -7,7 +7,12 @@ import {
   PaymentPlatform,
 } from '../common/types/payment.types';
 import { PaymentTransaction } from './entities/payment-transaction.entity';
-import { parsePaymentMetadata, tryResolvePaidFor } from './utils/payment.util';
+import {
+  mergePaymentMetadata,
+  needsCourseIds,
+  parsePaymentMetadata,
+  resolvePaidForFromSources,
+} from './utils/payment.util';
 import { FlutterwaveService } from './flutterwave.service';
 import { PaymentDebugLogger } from './payment-debug.logger';
 import { PaymentFulfillmentService } from './payment-fulfillment.service';
@@ -47,7 +52,9 @@ export class PaymentSyncService {
     private readonly transactionsRepository: Repository<PaymentTransaction>,
   ) {}
 
-  async syncRecentTransactions(days = PaymentSyncService.DEFAULT_SYNC_DAYS): Promise<PaymentSyncSummary> {
+  async syncRecentTransactions(
+    days = PaymentSyncService.DEFAULT_SYNC_DAYS,
+  ): Promise<PaymentSyncSummary> {
     const syncDays = Math.min(
       Math.max(days, 1),
       PaymentSyncService.MAX_SYNC_DAYS,
@@ -55,7 +62,9 @@ export class PaymentSyncService {
     const to = this.formatDate(new Date());
     const from = this.formatDate(this.subtractDays(new Date(), syncDays));
 
-    this.logger.log(`Starting Flutterwave sync for ${from} to ${to} (${syncDays} day(s))`);
+    this.logger.log(
+      `Starting Flutterwave sync for ${from} to ${to} (${syncDays} day(s))`,
+    );
     await this.paymentDebugLogger.log('sync.start', { from, to, days: syncDays });
 
     const transactions = await this.flutterwaveService.fetchAllTransactions(
@@ -98,10 +107,14 @@ export class PaymentSyncService {
   }
 
   private async syncTransaction(
-    transaction: FlutterwaveVerifyData,
+    listRow: FlutterwaveVerifyData,
   ): Promise<PaymentSyncItemResult> {
+    const transaction = await this.hydrateTransaction(listRow);
     const metadata = parsePaymentMetadata(transaction.meta);
-    const paidFor = tryResolvePaidFor(metadata.paidFor);
+    const paidFor = resolvePaidForFromSources({
+      metadataPaidFor: metadata.paidFor,
+      txRef: transaction.tx_ref,
+    });
     const base = {
       externalTransactionId: String(transaction.id),
       txRef: transaction.tx_ref || null,
@@ -113,14 +126,18 @@ export class PaymentSyncService {
         return {
           ...base,
           status: 'skipped',
-          reason: 'Failed Flutterwave payment has no paidFor onboarding/course metadata',
+          reason:
+            'Failed Flutterwave payment has no paidFor onboarding/course metadata',
         };
       }
 
       try {
         await this.paymentFulfillmentService.recordFailedPayment({
           flutterwaveData: transaction,
-          webhookMeta: metadata,
+          webhookMeta: {
+            ...metadata,
+            ...(paidFor ? { paidFor } : {}),
+          },
           source: 'sync',
           failureReason: `Flutterwave payment status: ${transaction.status}`,
         });
@@ -144,7 +161,8 @@ export class PaymentSyncService {
       return {
         ...base,
         status: 'skipped',
-        reason: 'Transaction metadata has no paidFor onboarding/course value',
+        reason:
+          'Transaction metadata has no paidFor onboarding/course value (and tx_ref prefix is unknown)',
       };
     }
 
@@ -163,10 +181,26 @@ export class PaymentSyncService {
       };
     }
 
+    if (paidFor === PaidFor.COURSE && needsCourseIds(metadata)) {
+      return {
+        ...base,
+        status: 'failed',
+        reason:
+          'Course payment is missing courseId/courseIds in Flutterwave metadata — cannot enroll from sync alone',
+      };
+    }
+
     try {
       const result = await this.paymentFulfillmentService.verifyAndFulfill({
-        flutterwaveData: transaction,
+        flutterwaveData: {
+          ...transaction,
+          meta: {
+            ...metadata,
+            paidFor,
+          },
+        },
         source: 'sync',
+        forcedPaidFor: paidFor,
         registrationFallback: {
           email: metadata.email,
           partnerId: metadata.partnerId,
@@ -174,7 +208,10 @@ export class PaymentSyncService {
           fullName: metadata.fullName,
           phone: metadata.phone,
         },
-        webhookMeta: metadata,
+        webhookMeta: {
+          ...metadata,
+          paidFor,
+        },
       });
 
       const resultRecord = result as Record<string, unknown>;
@@ -203,6 +240,69 @@ export class PaymentSyncService {
         ...base,
         status: 'failed',
         reason: `Payment succeeded on Flutterwave but processing failed: ${reason}`,
+      };
+    }
+  }
+
+  /**
+   * List endpoints often omit meta. Re-verify by tx_ref (or id) when metadata
+   * is incomplete so sync can fulfill the same way as webhook/verify.
+   */
+  private async hydrateTransaction(
+    listRow: FlutterwaveVerifyData,
+  ): Promise<FlutterwaveVerifyData> {
+    const listMeta = parsePaymentMetadata(listRow.meta);
+    const paidFor = resolvePaidForFromSources({
+      metadataPaidFor: listMeta.paidFor,
+      txRef: listRow.tx_ref,
+    });
+    const incomplete =
+      !paidFor ||
+      (paidFor === PaidFor.COURSE && needsCourseIds(listMeta)) ||
+      (!listMeta.email && !listMeta.userId);
+
+    if (!incomplete) {
+      return {
+        ...listRow,
+        meta: mergePaymentMetadata(listMeta, { paidFor: paidFor ?? undefined }),
+      };
+    }
+
+    try {
+      const verified = listRow.tx_ref
+        ? await this.flutterwaveService.verifyByReference(listRow.tx_ref)
+        : await this.flutterwaveService.verifyByTransactionId(listRow.id);
+
+      const verifiedMeta = mergePaymentMetadata(
+        parsePaymentMetadata(listRow.meta),
+        parsePaymentMetadata(verified.meta),
+      );
+      const resolvedPaidFor = resolvePaidForFromSources({
+        metadataPaidFor: verifiedMeta.paidFor,
+        txRef: verified.tx_ref || listRow.tx_ref,
+      });
+
+      return {
+        ...listRow,
+        ...verified,
+        tx_ref: verified.tx_ref || listRow.tx_ref,
+        meta: {
+          ...verifiedMeta,
+          ...(resolvedPaidFor ? { paidFor: resolvedPaidFor } : {}),
+        },
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Could not re-verify transaction ${listRow.id} during sync: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return {
+        ...listRow,
+        meta: {
+          ...listMeta,
+          ...(paidFor ? { paidFor } : {}),
+        },
       };
     }
   }
