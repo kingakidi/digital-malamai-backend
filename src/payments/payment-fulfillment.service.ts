@@ -1160,9 +1160,18 @@ export class PaymentFulfillmentService {
     }
   }
 
-  private async deliverCourseAccess(user: User, courseId: string, courseTitle: string) {
+  private async deliverCourseAccess(
+    user: User,
+    courseId: string,
+    courseTitle: string,
+  ): Promise<{ emailSent: boolean; whatsappSent: boolean }> {
     const videos = await this.coursesService.getCourseVideos(courseId);
-    const links = videos.map((video) => `${video.title}: ${video.vimeoUrl}`).join('\n');
+    const links = videos
+      .map((video) => `${video.title}: ${video.vimeoUrl}`)
+      .join('\n');
+
+    let emailSent = false;
+    let whatsappSent = false;
 
     try {
       await this.mailService.sendTemplateMail(user.email, 'course-delivery', {
@@ -1170,12 +1179,14 @@ export class PaymentFulfillmentService {
         courseTitle,
         links,
       });
+      emailSent = true;
 
       if (user.phone) {
-        await this.phoneMessagingService.sendMessage(
-          user.phone,
-          `Your course "${courseTitle}" is ready. Check your email for video links.`,
-        );
+        const whatsappBody = links
+          ? `Your course "${courseTitle}" is ready.\n\n${links}`
+          : `Your course "${courseTitle}" is ready. Check your email for video links.`;
+        await this.phoneMessagingService.sendMessage(user.phone, whatsappBody);
+        whatsappSent = true;
       }
 
       await this.notificationsService.log({
@@ -1195,6 +1206,50 @@ export class PaymentFulfillmentService {
         status: NotificationStatus.FAILED,
       });
     }
+
+    return { emailSent, whatsappSent };
+  }
+
+  /**
+   * Re-send lesson links to an enrolled student's email and WhatsApp.
+   */
+  async resendCourseAccess(userId: string, courseId: string) {
+    const enrollment = await this.coursesService.findEnrollment(
+      userId,
+      courseId,
+    );
+    if (!enrollment) {
+      throw new ForbiddenException(
+        'You must be enrolled in this course to receive lesson links',
+      );
+    }
+
+    const user = await this.userService.findByIdWithRole(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const course = await this.coursesService.findPublishedCourse(courseId);
+    const delivery = await this.deliverCourseAccess(
+      user,
+      course.id,
+      course.title,
+    );
+
+    if (!delivery.emailSent) {
+      throw new BadRequestException(
+        'Could not send course links. Please try again shortly.',
+      );
+    }
+
+    return {
+      courseId: course.id,
+      courseTitle: course.title,
+      delivery: {
+        email: delivery.emailSent,
+        whatsapp: delivery.whatsappSent,
+      },
+    };
   }
 
   private serializeTransaction(transaction: PaymentTransaction) {
