@@ -137,18 +137,19 @@ export class AccessCodesService {
       ? query.sortBy!
       : 'createdAt';
 
+    // Partners no longer own code inventories. Show codes used by their students.
     const qb = this.accessCodesRepository
       .createQueryBuilder('accessCode')
-      .leftJoinAndSelect('accessCode.student', 'student')
-      .where('accessCode.partnerId = :partnerId', { partnerId });
+      .innerJoinAndSelect('accessCode.student', 'student')
+      .where('accessCode.isUsed = :isUsed', { isUsed: true })
+      .andWhere('student.partnerId = :partnerId', { partnerId });
 
     if (query.search) {
-      qb.andWhere('accessCode.code LIKE :search', {
-        search: `%${query.search}%`,
-      });
+      qb.andWhere(
+        '(accessCode.code LIKE :search OR student.firstName LIKE :search OR student.lastName LIKE :search OR student.email LIKE :search)',
+        { search: `%${query.search}%` },
+      );
     }
-
-    this.applyStatusFilter(qb, query.status);
 
     qb.orderBy(`accessCode.${sortBy}`, query.sortOrder ?? SortOrder.DESC)
       .skip(skip)
@@ -180,10 +181,14 @@ export class AccessCodesService {
     partnerId: string,
     id: string,
   ): Promise<SerializedAccessCodeDetail> {
-    const accessCode = await this.accessCodesRepository.findOne({
-      where: { id, partnerId },
-      relations: ['student', 'partner'],
-    });
+    const accessCode = await this.accessCodesRepository
+      .createQueryBuilder('accessCode')
+      .leftJoinAndSelect('accessCode.student', 'student')
+      .leftJoinAndSelect('accessCode.partner', 'partner')
+      .where('accessCode.id = :id', { id })
+      .andWhere('accessCode.isUsed = :isUsed', { isUsed: true })
+      .andWhere('student.partnerId = :partnerId', { partnerId })
+      .getOne();
 
     if (!accessCode) {
       throw new NotFoundException('Access code not found');
@@ -217,25 +222,18 @@ export class AccessCodesService {
   async getStatsForPartner(partnerId: string): Promise<AccessCodeStats> {
     await this.partnersService.findOneEntity(partnerId);
 
-    const now = new Date();
-
-    const [total, used, expired] = await Promise.all([
-      this.accessCodesRepository.count({ where: { partnerId } }),
-      this.accessCodesRepository.count({ where: { partnerId, isUsed: true } }),
-      this.accessCodesRepository
-        .createQueryBuilder('accessCode')
-        .where('accessCode.partnerId = :partnerId', { partnerId })
-        .andWhere('accessCode.isUsed = :isUsed', { isUsed: false })
-        .andWhere('accessCode.expiresAt IS NOT NULL')
-        .andWhere('accessCode.expiresAt < :now', { now })
-        .getCount(),
-    ]);
+    const used = await this.accessCodesRepository
+      .createQueryBuilder('accessCode')
+      .innerJoin('accessCode.student', 'student')
+      .where('accessCode.isUsed = :isUsed', { isUsed: true })
+      .andWhere('student.partnerId = :partnerId', { partnerId })
+      .getCount();
 
     return {
-      total,
+      total: used,
       used,
-      unused: total - used,
-      expired,
+      unused: 0,
+      expired: 0,
     };
   }
 

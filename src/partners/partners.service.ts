@@ -413,10 +413,12 @@ export class PartnersService {
     const accessRows = await this.dataSource
       .getRepository(AccessCode)
       .createQueryBuilder('accessCode')
-      .select('accessCode.partnerId', 'partnerId')
+      .innerJoin('accessCode.student', 'student')
+      .select('student.partnerId', 'partnerId')
       .addSelect('COUNT(*)', 'cnt')
-      .where('accessCode.partnerId IN (:...ids)', { ids })
-      .groupBy('accessCode.partnerId')
+      .where('student.partnerId IN (:...ids)', { ids })
+      .andWhere('accessCode.isUsed = :isUsed', { isUsed: true })
+      .groupBy('student.partnerId')
       .getRawMany<{ partnerId: string; cnt: string }>();
 
     const studentMap = new Map(
