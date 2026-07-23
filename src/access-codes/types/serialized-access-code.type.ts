@@ -8,6 +8,7 @@ export interface SerializedAccessCodeStudent {
 export interface SerializedAccessCode {
   id: string;
   code: string;
+  partnerId: string | null;
   isUsed: boolean;
   expiresAt: Date | null;
   createdAt: Date;

@@ -169,15 +169,16 @@
       <div class="card">
         <h1>Student signup</h1>
         <p class="lead">
-          Choose a partner, enter your details and access code, then pay the
-          onboarding fee. Your account is created after payment is verified.
+          Choose a partner (optional), enter your details and access code, then
+          pay the onboarding fee. Your account is created after payment is
+          verified.
         </p>
 
         <div id="statusMessage" class="message hidden" role="alert"></div>
 
         <form id="signupForm">
-          <label for="partnerId">Partner</label>
-          <select id="partnerId" name="partnerId" required>
+          <label for="partnerId">Partner (optional)</label>
+          <select id="partnerId" name="partnerId">
             <option value="">Loading partners…</option>
           </select>
 
@@ -402,7 +403,8 @@
 
         state.partners = partners;
 
-        els.partnerId.innerHTML = '<option value="">Select a partner</option>';
+        els.partnerId.innerHTML =
+          '<option value="">No partner (optional)</option>';
         partners.forEach((partner) => {
           const option = document.createElement('option');
           option.value = partner.id;
@@ -511,16 +513,13 @@
         hideMessage();
 
         const values = getFormValues();
-        const partner = state.partners.find((p) => p.id === values.partnerId);
+        const partner = values.partnerId
+          ? state.partners.find((p) => p.id === values.partnerId)
+          : null;
         const amount = resolvePartnerFee(partner);
 
-        if (!values.partnerId) {
-          showMessage('Please select a partner.', 'error');
-          return;
-        }
-
         if (amount == null || amount <= 0) {
-          showMessage('Onboarding fee is not configured for this partner.', 'error');
+          showMessage('Onboarding fee is not configured.', 'error');
           return;
         }
 
@@ -535,7 +534,7 @@
               body: JSON.stringify({
                 email: values.email,
                 paidFor: 'onboarding',
-                partnerId: values.partnerId,
+                ...(values.partnerId ? { partnerId: values.partnerId } : {}),
               }),
             },
           );
@@ -547,9 +546,16 @@
 
           els.submitBtn.textContent = 'Validating…';
 
+          const { fullName, email, phone, accessCode, partnerId } = values;
           const validation = await apiRequest('/auth/student/register', {
             method: 'POST',
-            body: JSON.stringify(values),
+            body: JSON.stringify({
+              fullName,
+              email,
+              phone,
+              accessCode,
+              ...(partnerId ? { partnerId } : {}),
+            }),
           });
 
           const txRef = buildTxRef();
@@ -617,7 +623,7 @@
               ? { transactionId: String(transactionId) }
               : {}),
             email: stored.email,
-            partnerId: stored.partnerId,
+            ...(stored.partnerId ? { partnerId: stored.partnerId } : {}),
             accessCode: stored.accessCode,
             fullName: stored.fullName,
             phone: stored.phone,

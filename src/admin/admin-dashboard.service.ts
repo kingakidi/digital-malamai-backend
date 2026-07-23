@@ -340,8 +340,8 @@ export class AdminDashboardService {
     );
 
     return [
-      { id: 'onboarding', label: 'Onboarding Fees', value: onboardingTotal, color: '#008B8B' },
-      { id: 'course', label: 'Course Fees', value: courseTotal, color: '#006868' },
+      { id: 'onboarding', label: 'Onboarding Fees', value: onboardingTotal, color: '#306eb7' },
+      { id: 'course', label: 'Course Fees', value: courseTotal, color: '#234f84' },
       { id: 'platform', label: 'Platform Cut', value: platformCut, color: '#F59E0B' },
       { id: 'partner', label: 'Partner Cut', value: partnerCut, color: '#EC4899' },
     ];

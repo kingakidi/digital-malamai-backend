@@ -1,40 +1,47 @@
 import { registerAs } from '@nestjs/config';
 
+/**
+ * Mirrors fileam-backend-api-enterprise `MEDIA_CONFIG` / `S3_CONFIG`.
+ * `partners` is kept for Digital Malamai domain uploads (logos).
+ */
 export const UPLOAD_FOLDERS = {
   MEDIA: 'media',
   IMAGES: 'images',
+  VIDEOS: 'videos',
+  DOCUMENTS: 'documents',
+  MENU_ITEMS: 'menu-items',
+  CATEGORIES: 'categories',
+  BRANCHES: 'branches',
+  USERS: 'users',
   PARTNERS: 'partners',
 } as const;
 
 export type UploadFolder = (typeof UPLOAD_FOLDERS)[keyof typeof UPLOAD_FOLDERS];
 
-export const ALLOWED_IMAGE_MIME_TYPES = [
+export const ALLOWED_FILE_TYPES = [
   'image/jpeg',
   'image/png',
+  'image/gif',
+  'image/webp',
+  'image/svg+xml',
   'image/jpg',
+  'video/mp4',
+  'video/avi',
+  'video/mov',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ] as const;
 
-/** Fallback only when MEDIA_MAX_UPLOAD_BYTES is unset or invalid. */
-const DEFAULT_MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
+/** Same as Fileam: 10MB */
+export const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
-function resolveMaxUploadBytes(): number {
-  const raw = process.env.MEDIA_MAX_UPLOAD_BYTES?.trim();
-  if (!raw) {
-    return DEFAULT_MAX_UPLOAD_BYTES;
-  }
-
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return DEFAULT_MAX_UPLOAD_BYTES;
-  }
-
-  return Math.floor(parsed);
-}
+export const DEFAULT_PRESIGNED_EXPIRY_SECONDS = 3600;
+export const PRESIGNED_EXPIRY_MAX_SECONDS = 604800;
 
 /**
  * Node on Windows often resolves `localhost` to IPv6 (::1) first.
- * Local MinIO/S3 typically listens on IPv4 only, which causes
- * `ECONNREFUSED ::1:9000`. Prefer 127.0.0.1 for loopback hosts.
+ * Prefer 127.0.0.1 for loopback hosts (MinIO / local S3).
  */
 function preferIpv4Loopback(url: string | undefined): string | undefined {
   if (!url) {
@@ -51,10 +58,12 @@ export default registerAs('media', () => ({
   secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? '',
   region: process.env.S3_REGION ?? 'us-east-1',
   bucketName: process.env.S3_BUCKET_NAME ?? '',
+  /** Loaded like Fileam; not used for URL generation. */
+  bucketUrl: preferIpv4Loopback(process.env.S3_BUCKET_URL) || '',
   endpoint: preferIpv4Loopback(process.env.S3_ENDPOINT) || undefined,
-  publicBaseUrl: preferIpv4Loopback(process.env.S3_PUBLIC_BASE_URL) || undefined,
-  forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== 'false',
-  allowedImageMimeTypes: ALLOWED_IMAGE_MIME_TYPES,
-  maxImageSizeBytes: resolveMaxUploadBytes(),
-  presignedExpirySeconds: 3600,
+  /** Fileam documents this but always forces path style on the client. */
+  forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true',
+  allowedFileTypes: ALLOWED_FILE_TYPES,
+  maxFileSizeBytes: MAX_FILE_SIZE,
+  presignedExpirySeconds: DEFAULT_PRESIGNED_EXPIRY_SECONDS,
 }));

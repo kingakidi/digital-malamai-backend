@@ -5,10 +5,13 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  ALLOWED_IMAGE_MIME_TYPES,
+  ALLOWED_FILE_TYPES,
+  DEFAULT_PRESIGNED_EXPIRY_SECONDS,
+  MAX_FILE_SIZE,
+  PRESIGNED_EXPIRY_MAX_SECONDS,
   UPLOAD_FOLDERS,
   UploadFolder,
 } from './media.config';
@@ -18,28 +21,25 @@ import {
   isLikelyS3Key,
 } from './utils/extract-s3-key.util';
 
-const PRESIGNED_EXPIRY_MAX_SECONDS = 604800;
-
+/**
+ * Nest port of Fileam `src/config/s3.ts` + `mediaUploadService.ts`.
+ * View/serve always uses GetObject presigned URLs (no public-base-url shortcut).
+ */
 @Injectable()
 export class S3Service {
-  private readonly logger = new Logger(S3Service.name);
   private readonly client: S3Client | null;
   private readonly bucketName: string;
   private readonly region: string;
   private readonly endpoint?: string;
-  private readonly publicBaseUrl?: string;
   private readonly presignedExpirySeconds: number;
-  private readonly maxImageSizeBytes: number;
 
   constructor(private readonly configService: ConfigService) {
     this.bucketName = this.configService.get<string>('media.bucketName') ?? '';
     this.region = this.configService.get<string>('media.region') ?? 'us-east-1';
     this.endpoint = this.configService.get<string>('media.endpoint');
-    this.publicBaseUrl = this.configService.get<string>('media.publicBaseUrl');
     this.presignedExpirySeconds =
-      this.configService.get<number>('media.presignedExpirySeconds') ?? 3600;
-    this.maxImageSizeBytes =
-      this.configService.get<number>('media.maxImageSizeBytes') ?? 2 * 1024 * 1024;
+      this.configService.get<number>('media.presignedExpirySeconds') ??
+      DEFAULT_PRESIGNED_EXPIRY_SECONDS;
 
     if (this.isConfigured()) {
       this.client = new S3Client({
@@ -51,14 +51,15 @@ export class S3Service {
             this.configService.get<string>('media.secretAccessKey') ?? '',
         },
         ...(this.getBaseEndpoint() && { endpoint: this.getBaseEndpoint() }),
-        forcePathStyle:
-          this.configService.get<boolean>('media.forcePathStyle') ?? true,
+        // Fileam always sets forcePathStyle: true (env flag is ignored for the client).
+        forcePathStyle: true,
       });
     } else {
       this.client = null;
     }
   }
 
+  /** Fileam `validateS3Config` (silent boolean; errors surface via API messages). */
   isConfigured(): boolean {
     return Boolean(
       this.configService.get<string>('media.accessKeyId') &&
@@ -67,16 +68,26 @@ export class S3Service {
     );
   }
 
-  getAllowedImageMimeTypes(): readonly string[] {
-    return ALLOWED_IMAGE_MIME_TYPES;
+  getAllowedFileTypes(): readonly string[] {
+    return ALLOWED_FILE_TYPES;
   }
 
-  getMaxImageSizeBytes(): number {
-    return this.maxImageSizeBytes;
+  getMaxFileSizeBytes(): number {
+    return (
+      this.configService.get<number>('media.maxFileSizeBytes') ?? MAX_FILE_SIZE
+    );
+  }
+
+  getDefaultPresignedExpirySeconds(): number {
+    return this.presignedExpirySeconds;
+  }
+
+  getPresignedExpiryMaxSeconds(): number {
+    return PRESIGNED_EXPIRY_MAX_SECONDS;
   }
 
   resolveUploadFolder(folder?: string): UploadFolder {
-    const normalized = folder?.trim().toLowerCase();
+    const normalized = folder?.trim();
     const allowed = Object.values(UPLOAD_FOLDERS) as string[];
     if (normalized && allowed.includes(normalized)) {
       return normalized as UploadFolder;
@@ -84,30 +95,22 @@ export class S3Service {
     return UPLOAD_FOLDERS.MEDIA;
   }
 
+  /** Fileam `generateFileKey` */
   generateFileKey(folder: string, filename: string): string {
     const timestamp = Date.now();
     const randomString = Math.random().toString(36).substring(2, 15);
-    const parts = filename.split('.');
-    const extension = parts.length > 1 ? parts.pop() : 'bin';
-    const nameWithoutExt = parts.join('.') || 'file';
+    const extension = filename.split('.').pop();
+    const nameWithoutExt = filename.split('.').slice(0, -1).join('.');
 
     return `${folder}/${nameWithoutExt}-${timestamp}-${randomString}.${extension}`;
   }
 
-  buildDirectUrl(key: string): string {
-    if (this.publicBaseUrl) {
-      return `${this.publicBaseUrl.replace(/\/+$/, '')}/${key}`;
-    }
-
+  /** Fileam `generateS3Url` */
+  generateS3Url(key: string): string {
     if (this.endpoint) {
       return `${this.endpoint.replace(/\/+$/, '')}/${key}`;
     }
-
     return `https://${this.bucketName}.s3.${this.region}.amazonaws.com/${key}`;
-  }
-
-  usesPublicUrls(): boolean {
-    return Boolean(this.publicBaseUrl);
   }
 
   extractKeyFromUrl(url: string | null | undefined): string | null {
@@ -121,13 +124,16 @@ export class S3Service {
     return isLikelyS3Key(value);
   }
 
+  /** Fileam `uploadToS3` */
   async upload(params: {
     buffer: Buffer;
     mimetype: string;
     originalName: string;
     folder?: string;
-  }): Promise<{ url: string; key: string }> {
-    this.assertConfigured();
+  }): Promise<{ url: string; key: string } | null> {
+    if (!this.isConfigured() || !this.client) {
+      return null;
+    }
 
     const folder = this.resolveUploadFolder(params.folder);
     const key = this.generateFileKey(folder, params.originalName || 'file');
@@ -138,16 +144,16 @@ export class S3Service {
       ContentType: params.mimetype || 'application/octet-stream',
     });
 
-    await this.client!.send(command);
-
+    await this.client.send(command);
     return {
       key,
-      url: this.buildDirectUrl(key),
+      url: this.generateS3Url(key),
     };
   }
 
+  /** Fileam `deleteFromS3` */
   async delete(key: string): Promise<boolean> {
-    if (!this.isConfigured() || !key.trim()) {
+    if (!this.isConfigured() || !this.client || !key.trim()) {
       return false;
     }
 
@@ -156,34 +162,21 @@ export class S3Service {
         Bucket: this.bucketName,
         Key: key,
       });
-      await this.client!.send(command);
+      await this.client.send(command);
       return true;
-    } catch (error) {
-      this.logger.warn(`Failed to delete S3 object "${key}"`, error);
+    } catch {
       return false;
     }
   }
 
-  async getPublicUrl(
-    key: string,
-    expiresInSeconds?: number,
-  ): Promise<string | null> {
-    if (!key.trim()) {
-      return null;
-    }
-
-    if (this.usesPublicUrls()) {
-      return this.buildDirectUrl(key);
-    }
-
-    return this.getPresignedUrl(key, expiresInSeconds);
-  }
-
+  /** Fileam `getPresignedUrl` — used for both `/view` redirect and `/presigned`. */
   async getPresignedUrl(
     key: string,
     expiresInSeconds: number = this.presignedExpirySeconds,
   ): Promise<string | null> {
-    this.assertConfigured();
+    if (!this.isConfigured() || !this.client) {
+      return null;
+    }
 
     const expiresIn = Math.min(
       Math.max(expiresInSeconds, 60),
@@ -195,18 +188,18 @@ export class S3Service {
       Key: key,
     });
 
-    return getSignedUrl(this.client!, command, { expiresIn });
+    return getSignedUrl(this.client, command, { expiresIn });
   }
 
   private getExtractKeyOptions(): ExtractS3KeyOptions {
     return {
       bucketName: this.bucketName,
       endpoint: this.endpoint,
-      publicBaseUrl: this.publicBaseUrl,
       region: this.region,
     };
   }
 
+  /** Fileam `getBaseEndpoint` */
   private getBaseEndpoint(): string | undefined {
     if (!this.endpoint) {
       return undefined;
@@ -217,11 +210,5 @@ export class S3Service {
     }
 
     return this.endpoint;
-  }
-
-  private assertConfigured(): void {
-    if (!this.isConfigured() || !this.client) {
-      throw new Error('S3 is not configured');
-    }
   }
 }

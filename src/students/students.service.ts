@@ -49,17 +49,22 @@ export class StudentsService {
   ) {}
 
   async register(dto: RegisterStudentDto) {
-    const partner = await this.assertRegistrationValid(dto);
+    await this.assertRegistrationValid(dto);
     const systemFee = await this.settingsService.getOnboardingFee();
-    const onboardingFee =
-      await this.settingsService.resolveOnboardingFeeForPartner(
-        partner.onboardingFee,
-      );
+
+    let onboardingFee = Number(systemFee.amount);
+    if (dto.partnerId) {
+      const partner = await this.partnersService.findOneEntity(dto.partnerId);
+      onboardingFee =
+        await this.settingsService.resolveOnboardingFeeForPartner(
+          partner.onboardingFee,
+        );
+    }
 
     return {
       validated: true,
       email: dto.email.toLowerCase(),
-      partnerId: dto.partnerId,
+      partnerId: dto.partnerId ?? null,
       onboardingFee,
       currency: systemFee.currency,
     };
@@ -85,9 +90,12 @@ export class StudentsService {
       );
     }
 
-    const partner = await this.partnersService.findOneEntity(input.partnerId);
-    if (partner.status !== PartnerStatus.ACTIVE) {
-      throw new ConflictException('Partner is not active');
+    const partnerId = input.partnerId || null;
+    if (partnerId) {
+      const partner = await this.partnersService.findOneEntity(partnerId);
+      if (partner.status !== PartnerStatus.ACTIVE) {
+        throw new ConflictException('Partner is not active');
+      }
     }
 
     const studentRole = await this.rolesService.findByName(RoleName.STUDENT);
@@ -102,17 +110,12 @@ export class StudentsService {
       .createQueryBuilder(AccessCode, 'accessCode')
       .setLock('pessimistic_write')
       .where('accessCode.code = :code', { code: normalizedCode })
-      .andWhere('accessCode.partnerId = :partnerId', {
-        partnerId: input.partnerId,
-      })
+      .andWhere('accessCode.isUsed = :isUsed', { isUsed: false })
+      .orderBy('accessCode.createdAt', 'ASC')
       .getOne();
 
     if (!accessCode) {
-      throw new ConflictException('Invalid access code for this partner');
-    }
-
-    if (accessCode.isUsed) {
-      throw new ConflictException('Access code has already been used');
+      throw new ConflictException('Invalid or already used access code');
     }
 
     if (accessCode.expiresAt && accessCode.expiresAt < new Date()) {
@@ -126,7 +129,7 @@ export class StudentsService {
       phone: input.phone,
       password: null,
       role: studentRole,
-      partnerId: input.partnerId,
+      partnerId,
       accessCodeId: accessCode.id,
       onboardingStatus: OnboardingStatus.PENDING,
     });
@@ -254,10 +257,12 @@ export class StudentsService {
   }
 
   private async assertRegistrationValid(dto: RegisterStudentDto) {
-    const partner = await this.partnersService.findOneEntity(dto.partnerId);
+    if (dto.partnerId) {
+      const partner = await this.partnersService.findOneEntity(dto.partnerId);
 
-    if (partner.status !== PartnerStatus.ACTIVE) {
-      throw new ConflictException('Partner is not active');
+      if (partner.status !== PartnerStatus.ACTIVE) {
+        throw new ConflictException('Partner is not active');
+      }
     }
 
     const existingEmail = await this.userService.findByEmail(
@@ -274,22 +279,17 @@ export class StudentsService {
 
     const normalizedCode = dto.accessCode.toUpperCase();
     const accessCode = await this.accessCodesRepository.findOne({
-      where: { code: normalizedCode, partnerId: dto.partnerId },
+      where: { code: normalizedCode, isUsed: false },
+      order: { createdAt: 'ASC' },
     });
 
     if (!accessCode) {
-      throw new ConflictException('Invalid access code for this partner');
-    }
-
-    if (accessCode.isUsed) {
-      throw new ConflictException('Access code has already been used');
+      throw new ConflictException('Invalid or already used access code');
     }
 
     if (accessCode.expiresAt && accessCode.expiresAt < new Date()) {
       throw new ConflictException('Access code has expired');
     }
-
-    return partner;
   }
 
   async validateCredential(user: User, credential: string): Promise<boolean> {

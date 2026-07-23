@@ -5,6 +5,7 @@ import { PartnersModule } from '../partners/partners.module';
 import { AccessCodeGeneratorService } from './access-code-generator.service';
 import {
   AdminAccessCodesController,
+  AdminGlobalAccessCodesController,
   PartnerAccessCodesController,
 } from './access-codes.controller';
 import { AccessCodesService } from './access-codes.service';
@@ -16,7 +17,11 @@ import { AccessCode } from './entities/access-code.entity';
     forwardRef(() => AuthModule),
     forwardRef(() => PartnersModule),
   ],
-  controllers: [PartnerAccessCodesController, AdminAccessCodesController],
+  controllers: [
+    PartnerAccessCodesController,
+    AdminGlobalAccessCodesController,
+    AdminAccessCodesController,
+  ],
   providers: [AccessCodesService, AccessCodeGeneratorService],
   exports: [AccessCodesService],
 })

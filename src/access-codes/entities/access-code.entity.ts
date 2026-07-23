@@ -11,17 +11,17 @@ import { Partner } from '../../partners/entities/partner.entity';
 import { User } from '../../user/entities/user.entity';
 
 @Entity('access_codes')
-@Unique(['code', 'partnerId'])
+@Unique('IDX_access_codes_code', ['code'])
 export class AccessCode {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
-  partnerId: string;
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  partnerId: string | null;
 
-  @ManyToOne(() => Partner, { nullable: false })
+  @ManyToOne(() => Partner, { nullable: true })
   @JoinColumn({ name: 'partnerId' })
-  partner: Partner;
+  partner: Partner | null;
 
   @Column({ length: 6 })
   code: string;

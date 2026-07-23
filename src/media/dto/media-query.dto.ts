@@ -9,7 +9,10 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { UPLOAD_FOLDERS } from '../media.config';
+import {
+  PRESIGNED_EXPIRY_MAX_SECONDS,
+  UPLOAD_FOLDERS,
+} from '../media.config';
 
 const UPLOAD_FOLDER_VALUES = Object.values(UPLOAD_FOLDERS);
 
@@ -30,14 +33,6 @@ export class MediaKeyQueryDto {
   key!: string;
 
   @ApiPropertyOptional({
-    description: 'Return JSON `{ url }` instead of redirecting',
-    example: 'true',
-  })
-  @IsOptional()
-  @Transform(({ value }) => value === true || value === 'true')
-  json?: boolean;
-
-  @ApiPropertyOptional({
     description: 'Presigned URL expiry in seconds (60-604800)',
     example: 3600,
   })
@@ -45,9 +40,11 @@ export class MediaKeyQueryDto {
   @Transform(({ value }) => (value === undefined ? undefined : Number(value)))
   @IsInt()
   @Min(60)
-  @Max(604800)
+  @Max(PRESIGNED_EXPIRY_MAX_SECONDS)
   expiresIn?: number;
 }
+
+export class PresignedMediaQueryDto extends MediaKeyQueryDto {}
 
 export class DeleteMediaQueryDto {
   @ApiPropertyOptional({ example: 'partners/logo-1234567890-abc123.png' })

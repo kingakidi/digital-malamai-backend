@@ -1,7 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsEmail,
   IsEnum,
+  IsOptional,
   IsUUID,
   ValidateIf,
 } from 'class-validator';
@@ -17,10 +19,13 @@ export class CheckPaymentEligibilityDto {
   paidFor: PaidFor;
 
   @ApiPropertyOptional({
-    description: 'Required when paidFor is onboarding',
+    description: 'Optional when paidFor is onboarding',
     format: 'uuid',
   })
-  @ValidateIf((dto: CheckPaymentEligibilityDto) => dto.paidFor === PaidFor.ONBOARDING)
+  @Transform(({ value }) =>
+    value === '' || value === null || value === undefined ? undefined : value,
+  )
+  @IsOptional()
   @IsUUID()
   partnerId?: string;
 

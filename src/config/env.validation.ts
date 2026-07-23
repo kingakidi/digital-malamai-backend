@@ -49,10 +49,9 @@ const ENV_RULES: EnvRule[] = [
   { key: 'S3_SECRET_ACCESS_KEY' },
   { key: 'S3_REGION' },
   { key: 'S3_BUCKET_NAME' },
+  { key: 'S3_BUCKET_URL' },
   { key: 'S3_ENDPOINT' },
-  { key: 'S3_PUBLIC_BASE_URL' },
   { key: 'S3_FORCE_PATH_STYLE' },
-  { key: 'MEDIA_MAX_UPLOAD_BYTES' },
 ];
 
 export function validateEnvironment(
@@ -129,14 +128,6 @@ export function validateEnvironment(
     )
   ) {
     errors.push('S3_FORCE_PATH_STYLE must be true or false');
-  }
-
-  const maxUploadRaw = config.MEDIA_MAX_UPLOAD_BYTES;
-  if (maxUploadRaw !== undefined && maxUploadRaw !== null && String(maxUploadRaw).trim() !== '') {
-    const maxUpload = Number(maxUploadRaw);
-    if (!Number.isFinite(maxUpload) || maxUpload <= 0) {
-      errors.push('MEDIA_MAX_UPLOAD_BYTES must be a positive number (bytes)');
-    }
   }
 
   if (errors.length > 0) {

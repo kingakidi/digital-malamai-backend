@@ -92,12 +92,6 @@ export class PaymentEligibilityService {
   }
 
   private assertRequiredScope(dto: CheckPaymentEligibilityDto): void {
-    if (dto.paidFor === PaidFor.ONBOARDING && !dto.partnerId) {
-      throw new BadRequestException(
-        'partnerId is required when paidFor is onboarding',
-      );
-    }
-
     if (dto.paidFor === PaidFor.COURSE && !dto.courseId) {
       throw new BadRequestException(
         'courseId is required when paidFor is course',
@@ -115,16 +109,14 @@ export class PaymentEligibilityService {
       if (
         user &&
         user.role.name === RoleName.STUDENT &&
-        user.partnerId === dto.partnerId &&
-        user.onboardingStatus === OnboardingStatus.ONBOARDED
+        user.onboardingStatus === OnboardingStatus.ONBOARDED &&
+        (!dto.partnerId || user.partnerId === dto.partnerId)
       ) {
-        const latest = user
-          ? await this.findFulfilledTransaction({
-              paidFor: PaidFor.ONBOARDING,
-              partnerId: dto.partnerId!,
-              userId: user.id,
-            })
-          : null;
+        const latest = await this.findFulfilledTransaction({
+          paidFor: PaidFor.ONBOARDING,
+          partnerId: dto.partnerId,
+          userId: user.id,
+        });
 
         return {
           transactionId: latest?.externalTransactionId ?? null,
@@ -134,7 +126,7 @@ export class PaymentEligibilityService {
       if (user) {
         const latest = await this.findFulfilledTransaction({
           paidFor: PaidFor.ONBOARDING,
-          partnerId: dto.partnerId!,
+          partnerId: dto.partnerId,
           userId: user.id,
         });
 
@@ -264,7 +256,10 @@ export class PaymentEligibilityService {
     }
 
     if (dto.paidFor === PaidFor.ONBOARDING) {
-      return metadata.partnerId === dto.partnerId;
+      if (dto.partnerId) {
+        return metadata.partnerId === dto.partnerId;
+      }
+      return true;
     }
 
     return metadata.courseId === dto.courseId;
@@ -272,7 +267,9 @@ export class PaymentEligibilityService {
 
   private buildAlreadyPaidMessage(dto: CheckPaymentEligibilityDto): string {
     if (dto.paidFor === PaidFor.ONBOARDING) {
-      return 'This email has already completed onboarding payment for the selected partner';
+      return dto.partnerId
+        ? 'This email has already completed onboarding payment for the selected partner'
+        : 'This email has already completed onboarding payment';
     }
 
     return 'This email has already paid for the selected course';

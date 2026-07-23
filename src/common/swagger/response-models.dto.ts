@@ -262,6 +262,9 @@ export class AccessCodeResponseDto {
   @ApiProperty()
   code: string;
 
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  partnerId: string | null;
+
   @ApiProperty()
   isUsed: boolean;
 
@@ -290,8 +293,8 @@ export class AccessCodeStatsResponseDto {
 }
 
 export class GenerateAccessCodesResultDto {
-  @ApiProperty({ format: 'uuid' })
-  partnerId: string;
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  partnerId: string | null;
 
   @ApiProperty()
   requested: number;
@@ -540,8 +543,8 @@ export class StudentRegistrationValidatedResponseDto {
   @ApiProperty()
   email: string;
 
-  @ApiProperty({ format: 'uuid' })
-  partnerId: string;
+  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  partnerId: string | null;
 
   @ApiProperty({ example: 5000 })
   onboardingFee: number;

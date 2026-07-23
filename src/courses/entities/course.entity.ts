@@ -50,4 +50,7 @@ export class Course {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  /** Populated by list queries via relation count — not a DB column. */
+  enrollmentCount?: number;
 }

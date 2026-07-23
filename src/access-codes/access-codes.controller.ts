@@ -70,6 +70,48 @@ export class PartnerAccessCodesController {
 @ApiTags('admin/access-codes')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, PermissionGuard, RoleGuard)
+@Controller('admin/access-codes')
+export class AdminGlobalAccessCodesController {
+  constructor(private readonly accessCodesService: AccessCodesService) {}
+
+  @Get()
+  @ApiOkPaginated(AccessCodeResponseDto)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.READ)
+  @ResponseMessage('Access codes retrieved successfully')
+  findAll(@Query() query: PaginationQueryDto) {
+    return this.accessCodesService.findAll(query);
+  }
+
+  @Get('stats')
+  @ApiOkData(AccessCodeStatsResponseDto)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.READ)
+  @ResponseMessage('Access code stats retrieved successfully')
+  getStats() {
+    return this.accessCodesService.getStats();
+  }
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiCreatedData(GenerateAccessCodesResultDto)
+  @RequireRole(RoleName.SUPERADMIN)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.CREATE)
+  @ResponseMessage('Access codes generated successfully')
+  generate(@Body() dto: GenerateAccessCodesDto) {
+    return this.accessCodesService.generate(dto);
+  }
+
+  @Delete()
+  @ApiOkData(DeleteAccessCodesResultDto)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.DELETE)
+  @ResponseMessage('Unused access codes deleted successfully')
+  deleteUnused(@Body() dto: DeleteAccessCodesDto) {
+    return this.accessCodesService.deleteUnused(dto);
+  }
+}
+
+@ApiTags('admin/access-codes')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, PermissionGuard, RoleGuard)
 @Controller('admin/partners')
 export class AdminAccessCodesController {
   constructor(private readonly accessCodesService: AccessCodesService) {}

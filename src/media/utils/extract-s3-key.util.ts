@@ -2,7 +2,7 @@ import { UPLOAD_FOLDERS } from '../media.config';
 
 const UPLOAD_FOLDER_VALUES = Object.values(UPLOAD_FOLDERS);
 const S3_KEY_PREFIX_PATTERN = new RegExp(
-  `^(${UPLOAD_FOLDER_VALUES.join('|')})/.+`,
+  `^(${UPLOAD_FOLDER_VALUES.map((folder) => folder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})/.+`,
 );
 
 export function isLikelyS3Key(value: string): boolean {
@@ -12,7 +12,6 @@ export function isLikelyS3Key(value: string): boolean {
 export type ExtractS3KeyOptions = {
   bucketName?: string;
   endpoint?: string;
-  publicBaseUrl?: string;
   region?: string;
 };
 
@@ -37,16 +36,6 @@ export function extractS3KeyFromUrl(
     const parsed = new URL(trimmed);
     const pathname = decodeURIComponent(parsed.pathname.replace(/^\/+/, ''));
 
-    if (options.publicBaseUrl) {
-      const base = options.publicBaseUrl.replace(/\/+$/, '');
-      if (trimmed.startsWith(base)) {
-        const key = trimmed.slice(base.length).replace(/^\/+/, '');
-        if (isLikelyS3Key(key)) {
-          return key;
-        }
-      }
-    }
-
     if (options.endpoint) {
       const endpointHost = new URL(options.endpoint).host;
       if (parsed.host === endpointHost) {
@@ -60,14 +49,20 @@ export function extractS3KeyFromUrl(
       }
     }
 
-    if (options.bucketName && parsed.host.startsWith(`${options.bucketName}.s3`)) {
+    if (
+      options.bucketName &&
+      parsed.host.startsWith(`${options.bucketName}.s3`)
+    ) {
       if (isLikelyS3Key(pathname)) {
         return pathname;
       }
     }
 
+    const folderPattern = UPLOAD_FOLDER_VALUES.map((folder) =>
+      folder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+    ).join('|');
     const pathMatch = pathname.match(
-      new RegExp(`((?:${UPLOAD_FOLDER_VALUES.join('|')})/.+)$`),
+      new RegExp(`((?:${folderPattern})/.+)$`),
     );
     if (pathMatch) {
       return pathMatch[1];

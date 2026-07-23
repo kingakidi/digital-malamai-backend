@@ -1,7 +1,9 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsEmail,
   IsNotEmpty,
+  IsOptional,
   IsString,
   IsUUID,
   Length,
@@ -9,9 +11,17 @@ import {
 } from 'class-validator';
 
 export class RegisterStudentDto {
-  @ApiProperty()
+  @ApiPropertyOptional({
+    format: 'uuid',
+    nullable: true,
+    description: 'Optional partner affiliation at signup',
+  })
+  @Transform(({ value }) =>
+    value === '' || value === null || value === undefined ? undefined : value,
+  )
+  @IsOptional()
   @IsUUID()
-  partnerId: string;
+  partnerId?: string;
 
   @ApiProperty({ example: 'Jane Doe' })
   @IsString()

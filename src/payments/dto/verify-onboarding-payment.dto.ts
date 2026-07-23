@@ -1,4 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsEmail,
   IsOptional,
@@ -20,8 +21,11 @@ export class VerifyOnboardingPaymentDto extends VerifyPaymentDto {
 
   @ApiPropertyOptional({
     description:
-      'Fallback partner id when Flutterwave metadata is missing',
+      'Optional fallback partner id when Flutterwave metadata is missing',
   })
+  @Transform(({ value }) =>
+    value === '' || value === null || value === undefined ? undefined : value,
+  )
   @IsOptional()
   @IsUUID()
   partnerId?: string;

@@ -536,10 +536,6 @@ export class PaymentFulfillmentService {
   ) {
     const studentAlreadyRegistered = Boolean(user);
 
-    if (user && !user.partnerId) {
-      throw new BadRequestException('Student is not linked to a partner');
-    }
-
     const registrationInput = user
       ? null
       : this.resolveOnboardingRegistrationInput(
@@ -549,11 +545,27 @@ export class PaymentFulfillmentService {
           registrationFallback,
         );
 
-    const partnerId = user?.partnerId ?? registrationInput!.partnerId;
-    const partner = await this.partnersService.findOneEntity(partnerId);
-    const expectedAmount = await this.settingsService.resolveOnboardingFeeForPartner(
-      partner.onboardingFee,
-    );
+    const partnerId =
+      user?.partnerId ?? registrationInput?.partnerId ?? null;
+
+    let partner: Partner | null = null;
+    let expectedAmount: number;
+    let partnerCut = 0;
+
+    if (partnerId) {
+      partner = await this.partnersService.findOneEntity(partnerId);
+      expectedAmount =
+        await this.settingsService.resolveOnboardingFeeForPartner(
+          partner.onboardingFee,
+        );
+      partnerCut = calculatePartnerCut(
+        Number(flutterwaveData.amount),
+        partner,
+      );
+    } else {
+      expectedAmount = await this.settingsService.getOnboardingFeeAmount();
+    }
+
     const paidAmount = Number(flutterwaveData.amount);
 
     if (paidAmount + 0.001 < expectedAmount) {
@@ -562,7 +574,6 @@ export class PaymentFulfillmentService {
       );
     }
 
-    const partnerCut = calculatePartnerCut(paidAmount, partner);
     const platformCut = roundMoney(paidAmount - partnerCut);
 
     let pendingReceipt:
@@ -649,7 +660,10 @@ export class PaymentFulfillmentService {
     email: string,
     registrationFallback?: Partial<OnboardingRegistrationInput>,
   ): OnboardingRegistrationInput {
-    const partnerId = metadata.partnerId ?? registrationFallback?.partnerId;
+    const partnerId =
+      metadata.partnerId ||
+      registrationFallback?.partnerId ||
+      null;
     const accessCode = metadata.accessCode ?? registrationFallback?.accessCode;
     const fullName =
       metadata.fullName ??
@@ -659,12 +673,6 @@ export class PaymentFulfillmentService {
       metadata.phone ??
       registrationFallback?.phone ??
       flutterwaveData.customer?.phone_number;
-
-    if (!partnerId) {
-      throw new BadRequestException(
-        'Payment metadata must include partnerId for onboarding registration',
-      );
-    }
 
     if (!accessCode) {
       throw new BadRequestException(
@@ -686,7 +694,7 @@ export class PaymentFulfillmentService {
 
     return {
       email,
-      partnerId,
+      partnerId: partnerId || null,
       accessCode,
       fullName: fullName.trim(),
       phone: phone.trim(),

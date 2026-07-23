@@ -135,7 +135,7 @@ export class Schema1783612421651 implements MigrationInterface {
         \`isUsed\` tinyint NOT NULL DEFAULT 0,
         \`expiresAt\` datetime NULL,
         \`createdAt\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-        UNIQUE INDEX \`IDX_access_codes_code_partner\` (\`code\`, \`partnerId\`),
+        UNIQUE INDEX \`IDX_access_codes_code\` (\`code\`),
         PRIMARY KEY (\`id\`),
         CONSTRAINT \`FK_access_codes_partner\` FOREIGN KEY (\`partnerId\`) REFERENCES \`partners\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION,
         CONSTRAINT \`FK_f8ad2a563f1257b736507988156\` FOREIGN KEY (\`studentId\`) REFERENCES \`users\`(\`id\`) ON DELETE NO ACTION ON UPDATE NO ACTION

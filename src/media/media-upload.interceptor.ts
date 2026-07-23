@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   CallHandler,
   ExecutionContext,
   Injectable,
@@ -11,18 +12,20 @@ import type { Request, Response } from 'express';
 import { S3Service } from './s3.service';
 
 /**
- * Multer upload interceptor whose size limit comes from config/env
- * (`MEDIA_MAX_UPLOAD_BYTES`) via S3Service — not a hardcoded constant.
+ * Fileam `uploadMiddleware`: memory storage, field `file`, size = MEDIA max.
  */
 @Injectable()
 export class MediaUploadInterceptor implements NestInterceptor {
   constructor(private readonly s3Service: S3Service) {}
 
-  intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
+  intercept(
+    context: ExecutionContext,
+    next: CallHandler,
+  ): Promise<Observable<unknown>> {
     const http = context.switchToHttp();
     const req = http.getRequest<Request>();
     const res = http.getResponse<Response>();
-    const maxBytes = this.s3Service.getMaxImageSizeBytes();
+    const maxBytes = this.s3Service.getMaxFileSizeBytes();
 
     const upload = multer({
       storage: multer.memoryStorage(),
@@ -45,6 +48,21 @@ export class MediaUploadInterceptor implements NestInterceptor {
             );
             return;
           }
+
+          if (
+            typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            (error as { code?: string }).code === 'LIMIT_UNEXPECTED_FILE'
+          ) {
+            reject(
+              new BadRequestException(
+                "Unexpected field. Use form field name 'file'.",
+              ),
+            );
+            return;
+          }
+
           reject(error);
           return;
         }

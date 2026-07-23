@@ -27,7 +27,7 @@ const MAX_SINGLE_INSERT_ATTEMPTS = 10;
 const ALLOWED_SORT_FIELDS = ['createdAt', 'code', 'isUsed', 'expiresAt'];
 
 export interface GenerateAccessCodesResult {
-  partnerId: string;
+  partnerId: string | null;
   requested: number;
   generated: number;
   codes?: SerializedAccessCode[];
@@ -47,19 +47,30 @@ export class AccessCodesService {
     private readonly accessCodeGenerator: AccessCodeGeneratorService,
   ) {}
 
+  async generate(dto: GenerateAccessCodesDto): Promise<GenerateAccessCodesResult> {
+    return this.generateBatch(null, dto);
+  }
+
   async generateForPartner(
     partnerId: string,
     dto: GenerateAccessCodesDto,
   ): Promise<GenerateAccessCodesResult> {
     await this.partnersService.findOneEntity(partnerId);
+    return this.generateBatch(partnerId, dto);
+  }
 
-    const requested = Math.min(dto.count ?? 1, MAX_ACCESS_CODES_PER_REQUEST);
-
-    if (requested <= ACCESS_CODE_PREVIEW_LIMIT) {
-      return this.generateSmallBatch(partnerId, requested);
+  async deleteUnused(dto: DeleteAccessCodesDto): Promise<DeleteAccessCodesResult> {
+    if (dto.deleteAllUnused) {
+      return this.deleteAllUnused();
     }
 
-    return this.generateLargeBatch(partnerId, requested);
+    if (!dto.ids?.length) {
+      throw new BadRequestException(
+        'Provide ids or set deleteAllUnused to true',
+      );
+    }
+
+    return this.deleteUnusedByIds(dto.ids);
   }
 
   async deleteForPartner(
@@ -78,7 +89,38 @@ export class AccessCodesService {
       );
     }
 
-    return this.deleteUnusedByIds(partnerId, dto.ids);
+    return this.deleteUnusedByIds(dto.ids, partnerId);
+  }
+
+  async findAll(
+    query: PaginationQueryDto,
+  ): Promise<PaginatedResult<SerializedAccessCode>> {
+    const skip = getPaginationSkip(query.page, query.limit);
+    const sortBy = ALLOWED_SORT_FIELDS.includes(query.sortBy ?? '')
+      ? query.sortBy!
+      : 'createdAt';
+
+    const qb = this.accessCodesRepository
+      .createQueryBuilder('accessCode')
+      .leftJoinAndSelect('accessCode.student', 'student');
+
+    if (query.search) {
+      qb.andWhere('accessCode.code LIKE :search', {
+        search: `%${query.search}%`,
+      });
+    }
+
+    qb.orderBy(`accessCode.${sortBy}`, query.sortOrder ?? SortOrder.DESC)
+      .skip(skip)
+      .take(query.limit);
+
+    const [items, total] = await qb.getManyAndCount();
+
+    return buildPaginatedResult(
+      items.map((code) => this.serialize(code)),
+      total,
+      query,
+    );
   }
 
   async findForPartner(
@@ -116,6 +158,28 @@ export class AccessCodesService {
     );
   }
 
+  async getStats(): Promise<AccessCodeStats> {
+    const now = new Date();
+
+    const [total, used, expired] = await Promise.all([
+      this.accessCodesRepository.count(),
+      this.accessCodesRepository.count({ where: { isUsed: true } }),
+      this.accessCodesRepository
+        .createQueryBuilder('accessCode')
+        .where('accessCode.isUsed = :isUsed', { isUsed: false })
+        .andWhere('accessCode.expiresAt IS NOT NULL')
+        .andWhere('accessCode.expiresAt < :now', { now })
+        .getCount(),
+    ]);
+
+    return {
+      total,
+      used,
+      unused: total - used,
+      expired,
+    };
+  }
+
   async getStatsForPartner(partnerId: string): Promise<AccessCodeStats> {
     await this.partnersService.findOneEntity(partnerId);
 
@@ -141,8 +205,21 @@ export class AccessCodesService {
     };
   }
 
+  private async generateBatch(
+    partnerId: string | null,
+    dto: GenerateAccessCodesDto,
+  ): Promise<GenerateAccessCodesResult> {
+    const requested = Math.min(dto.count ?? 1, MAX_ACCESS_CODES_PER_REQUEST);
+
+    if (requested <= ACCESS_CODE_PREVIEW_LIMIT) {
+      return this.generateSmallBatch(partnerId, requested);
+    }
+
+    return this.generateLargeBatch(partnerId, requested);
+  }
+
   private async generateSmallBatch(
-    partnerId: string,
+    partnerId: string | null,
     requested: number,
   ): Promise<GenerateAccessCodesResult> {
     const created: AccessCode[] = [];
@@ -160,7 +237,7 @@ export class AccessCodesService {
   }
 
   private async generateLargeBatch(
-    partnerId: string,
+    partnerId: string | null,
     requested: number,
   ): Promise<GenerateAccessCodesResult> {
     let generated = 0;
@@ -195,7 +272,7 @@ export class AccessCodesService {
   }
 
   private async insertUniqueCodeBatch(
-    partnerId: string,
+    partnerId: string | null,
     targetCount: number,
   ): Promise<number> {
     const candidates = new Set<string>();
@@ -204,7 +281,20 @@ export class AccessCodesService {
       candidates.add(this.accessCodeGenerator.generateCode());
     }
 
-    const values = [...candidates].map((code) => ({ partnerId, code }));
+    const candidateList = [...candidates];
+    const existing = await this.accessCodesRepository
+      .createQueryBuilder('accessCode')
+      .select(['accessCode.code'])
+      .where('accessCode.code IN (:...codes)', { codes: candidateList })
+      .getMany();
+    const existingCodes = new Set(existing.map((row) => row.code));
+    const values = candidateList
+      .filter((code) => !existingCodes.has(code))
+      .map((code) => ({ partnerId, code }));
+
+    if (values.length === 0) {
+      return 0;
+    }
 
     const result = await this.accessCodesRepository
       .createQueryBuilder()
@@ -228,6 +318,19 @@ export class AccessCodesService {
     return result.identifiers?.length ?? 0;
   }
 
+  private async deleteAllUnused(): Promise<DeleteAccessCodesResult> {
+    const totalUnused = await this.accessCodesRepository.count({
+      where: { isUsed: false },
+    });
+
+    const result = await this.buildUnusedDeleteQuery().execute();
+
+    return {
+      deleted: result.affected ?? 0,
+      skipped: Math.max(totalUnused - (result.affected ?? 0), 0),
+    };
+  }
+
   private async deleteAllUnusedForPartner(
     partnerId: string,
   ): Promise<DeleteAccessCodesResult> {
@@ -244,13 +347,14 @@ export class AccessCodesService {
   }
 
   private async deleteUnusedByIds(
-    partnerId: string,
     ids: string[],
+    partnerId?: string,
   ): Promise<DeleteAccessCodesResult> {
-    const result = await this.buildUnusedDeleteQuery(partnerId)
-      .andWhere('id IN (:...ids)', { ids })
-      .execute();
-
+    const qb = this.buildUnusedDeleteQuery(partnerId).andWhere(
+      'id IN (:...ids)',
+      { ids },
+    );
+    const result = await qb.execute();
     const deleted = result.affected ?? 0;
 
     return {
@@ -259,27 +363,31 @@ export class AccessCodesService {
     };
   }
 
-  private buildUnusedDeleteQuery(partnerId: string) {
-    return this.accessCodesRepository
+  private buildUnusedDeleteQuery(partnerId?: string) {
+    const qb = this.accessCodesRepository
       .createQueryBuilder()
       .delete()
       .from(AccessCode)
-      .where('partnerId = :partnerId', { partnerId })
-      .andWhere('isUsed = :isUsed', { isUsed: false })
+      .where('isUsed = :isUsed', { isUsed: false })
       .andWhere('studentId IS NULL')
       .andWhere(
         `id NOT IN (SELECT accessCodeId FROM users WHERE accessCodeId IS NOT NULL)`,
       );
+
+    if (partnerId) {
+      qb.andWhere('partnerId = :partnerId', { partnerId });
+    }
+
+    return qb;
   }
 
-  private async createUniqueCode(partnerId: string): Promise<AccessCode> {
+  private async createUniqueCode(
+    partnerId: string | null,
+  ): Promise<AccessCode> {
     for (let attempt = 0; attempt < MAX_SINGLE_INSERT_ATTEMPTS; attempt++) {
       const code = this.accessCodeGenerator.generateCode();
 
-      const existing = await this.accessCodesRepository.findOneBy({
-        partnerId,
-        code,
-      });
+      const existing = await this.accessCodesRepository.findOneBy({ code });
 
       if (!existing) {
         const accessCode = this.accessCodesRepository.create({
@@ -300,6 +408,7 @@ export class AccessCodesService {
     return {
       id: accessCode.id,
       code: accessCode.code,
+      partnerId: accessCode.partnerId,
       isUsed: accessCode.isUsed,
       expiresAt: accessCode.expiresAt,
       createdAt: accessCode.createdAt,

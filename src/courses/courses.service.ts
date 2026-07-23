@@ -159,7 +159,9 @@ export class CoursesService {
       ? query.sortBy!
       : 'createdAt';
 
-    const qb = this.coursesRepository.createQueryBuilder('course');
+    const qb = this.coursesRepository
+      .createQueryBuilder('course')
+      .loadRelationCountAndMap('course.enrollmentCount', 'course.enrollments');
 
     if (query.search) {
       qb.andWhere(
@@ -177,7 +179,11 @@ export class CoursesService {
   }
 
   async findCourseById(id: string): Promise<Course> {
-    const course = await this.coursesRepository.findOneBy({ id });
+    const course = await this.coursesRepository
+      .createQueryBuilder('course')
+      .loadRelationCountAndMap('course.enrollmentCount', 'course.enrollments')
+      .where('course.id = :id', { id })
+      .getOne();
 
     if (!course) {
       throw new NotFoundException(`Course ${id} not found`);

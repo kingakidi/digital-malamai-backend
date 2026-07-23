@@ -5,12 +5,11 @@ import {
   Get,
   HttpCode,
   HttpStatus,
-  Logger,
+  InternalServerErrorException,
   Post,
   Query,
   Req,
   Res,
-  ServiceUnavailableException,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -23,19 +22,23 @@ import { ResponseMessage } from '../common/decorators/response-message.decorator
 import {
   DeleteMediaQueryDto,
   MediaKeyQueryDto,
+  PresignedMediaQueryDto,
   UploadMediaQueryDto,
 } from './dto/media-query.dto';
+import { UPLOAD_FOLDERS } from './media.config';
 import { MediaUploadInterceptor } from './media-upload.interceptor';
 import { S3Service } from './s3.service';
 
+/**
+ * Nest port of Fileam `mediaUploadController` + `mediaRoutes`:
+ * - GET  /media/view       public redirect to presigned GetObject URL
+ * - GET  /media/presigned  auth JSON `{ url }`
+ * - POST /media/upload     auth multipart → `{ url, key }` (url = view proxy)
+ * - DELETE /media          auth delete by key
+ */
 @ApiTags('media')
 @Controller('media')
 export class MediaController {
-  private readonly logger = new Logger(MediaController.name);
-
-  private static readonly UPLOAD_UNAVAILABLE_MESSAGE =
-    "We couldn't upload your file right now. Please try again in a moment.";
-
   constructor(private readonly s3Service: S3Service) {}
 
   @ApiBearerAuth()
@@ -51,14 +54,14 @@ export class MediaController {
         file: { type: 'string', format: 'binary' },
         folder: {
           type: 'string',
-          enum: ['partners', 'media', 'images'],
+          enum: Object.values(UPLOAD_FOLDERS),
         },
       },
       required: ['file'],
     },
   })
   @UseInterceptors(MediaUploadInterceptor)
-  @ResponseMessage('File uploaded successfully')
+  @ResponseMessage('File uploaded')
   async upload(
     @UploadedFile() file: Express.Multer.File | undefined,
     @Query() query: UploadMediaQueryDto,
@@ -70,18 +73,19 @@ export class MediaController {
       );
     }
 
-    const allowed = this.s3Service.getAllowedImageMimeTypes();
+    const allowed = this.s3Service.getAllowedFileTypes();
     const mimetype = file.mimetype || 'application/octet-stream';
 
-    if (!allowed.includes(mimetype)) {
+    if (!(allowed as readonly string[]).includes(mimetype)) {
       throw new BadRequestException(
         `File type not allowed. Allowed: ${allowed.join(', ')}`,
       );
     }
 
-    if (file.size > this.s3Service.getMaxImageSizeBytes()) {
+    const maxBytes = this.s3Service.getMaxFileSizeBytes();
+    if (file.size > maxBytes) {
       throw new BadRequestException(
-        `File too large. Max size: ${this.s3Service.getMaxImageSizeBytes() / 1024 / 1024}MB`,
+        `File too large. Max size: ${maxBytes / 1024 / 1024}MB`,
       );
     }
 
@@ -89,37 +93,31 @@ export class MediaController {
       query.folder ??
       (typeof req.body?.folder === 'string' ? req.body.folder : undefined);
 
-    let result: { url: string; key: string };
-    try {
-      result = await this.s3Service.upload({
-        buffer: file.buffer,
-        mimetype,
-        originalName: file.originalname || 'file',
-        folder,
-      });
-    } catch (error) {
-      // Log the real cause for operators (e.g. storage unreachable, missing
-      // bucket, bad credentials) but never leak internals to the client.
-      this.logger.error(
-        'Media upload failed',
-        error instanceof Error ? error.stack : String(error),
-      );
-      throw new ServiceUnavailableException(
-        MediaController.UPLOAD_UNAVAILABLE_MESSAGE,
+    const result = await this.s3Service.upload({
+      buffer: file.buffer,
+      mimetype,
+      originalName: file.originalname || 'file',
+      folder,
+    });
+
+    if (!result) {
+      throw new InternalServerErrorException(
+        'Upload failed. S3 may not be configured.',
       );
     }
 
+    // Fileam returns the API view proxy URL, not the raw S3 URL.
     const origin = `${req.protocol}://${req.get('host') ?? ''}`;
     const apiPrefix = req.originalUrl.split('/media')[0] ?? '';
-    const viewUrl = `${origin}${apiPrefix}/media/view?key=${encodeURIComponent(result.key)}`;
+    const url = `${origin}${apiPrefix}/media/view?key=${encodeURIComponent(result.key)}`;
 
     return {
-      url: viewUrl,
+      url,
       key: result.key,
-      directUrl: result.url,
     };
   }
 
+  /** Public — Fileam `viewMedia`: always 302 to a GetObject presigned URL. */
   @Get('view')
   async view(
     @Query() query: MediaKeyQueryDto,
@@ -130,37 +128,51 @@ export class MediaController {
       throw new BadRequestException("Query parameter 'key' is required");
     }
 
-    let url: string | null;
-    try {
-      url = await this.s3Service.getPublicUrl(key, query.expiresIn);
-    } catch (error) {
-      this.logger.error(
-        `Failed to resolve media URL for key "${key}"`,
-        error instanceof Error ? error.stack : String(error),
-      );
-      throw new ServiceUnavailableException(
-        MediaController.UPLOAD_UNAVAILABLE_MESSAGE,
-      );
-    }
+    const expiresIn =
+      query.expiresIn ?? this.s3Service.getDefaultPresignedExpirySeconds();
 
+    const url = await this.s3Service.getPresignedUrl(key, expiresIn);
     if (!url) {
-      throw new ServiceUnavailableException(
-        MediaController.UPLOAD_UNAVAILABLE_MESSAGE,
-      );
-    }
-
-    if (query.json) {
-      return { url };
+      throw new InternalServerErrorException('Failed to generate media URL');
     }
 
     res.redirect(302, url);
     return undefined;
   }
 
+  /** Auth — Fileam `getPresignedUrlForView`: JSON `{ url }`. */
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Get('presigned')
+  @ResponseMessage('OK')
+  async getPresigned(@Query() query: PresignedMediaQueryDto) {
+    const key = query.key?.trim();
+    if (!key) {
+      throw new BadRequestException("Query parameter 'key' is required");
+    }
+
+    const max = this.s3Service.getPresignedExpiryMaxSeconds();
+    const expiresIn =
+      query.expiresIn ?? this.s3Service.getDefaultPresignedExpirySeconds();
+
+    if (expiresIn < 60 || expiresIn > max) {
+      throw new BadRequestException(
+        `expiresIn must be a number between 60 and ${max}`,
+      );
+    }
+
+    const url = await this.s3Service.getPresignedUrl(key, expiresIn);
+    if (!url) {
+      throw new InternalServerErrorException('Failed to generate media URL');
+    }
+
+    return { url };
+  }
+
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Delete()
-  @ResponseMessage('File deleted successfully')
+  @ResponseMessage('File deleted')
   async deleteMedia(@Query() query: DeleteMediaQueryDto) {
     const key = query.key?.trim();
     if (!key) {
@@ -169,10 +181,8 @@ export class MediaController {
 
     const deleted = await this.s3Service.delete(key);
     if (!deleted) {
-      // The S3 layer already logs the underlying reason; keep the client
-      // message friendly and non-technical.
-      throw new ServiceUnavailableException(
-        "We couldn't remove that file right now. Please try again in a moment.",
+      throw new InternalServerErrorException(
+        'Failed to delete file. S3 may not be configured or key may not exist.',
       );
     }
 
