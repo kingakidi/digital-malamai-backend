@@ -13,6 +13,10 @@ function sanitizeMessage(message: string): string {
   return message.replace(/^[A-Za-z][A-Za-z0-9_]*Exception:\s*/g, '').trim();
 }
 
+function isTechnicalHttpMessage(message: string): boolean {
+  return /^Cannot (GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b/i.test(message.trim());
+}
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
@@ -38,7 +42,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
       error = statusLabel;
 
       if (typeof exceptionResponse === 'string') {
-        message = sanitizeMessage(exceptionResponse) || statusLabel;
+        const cleaned = sanitizeMessage(exceptionResponse);
+        message =
+          cleaned && !isTechnicalHttpMessage(cleaned) ? cleaned : statusLabel;
         error = statusLabel;
       } else if (typeof exceptionResponse === 'object') {
         const body = exceptionResponse as Record<string, unknown>;
@@ -47,10 +53,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
           message = 'Validation failed';
           error = body.message as string[];
         } else if (typeof body.message === 'string') {
-          message = sanitizeMessage(body.message) || statusLabel;
+          const cleaned = sanitizeMessage(body.message);
+          message =
+            cleaned && !isTechnicalHttpMessage(cleaned) ? cleaned : statusLabel;
           error =
             typeof body.error === 'string' &&
-            !/[A-Za-z]+Exception$/i.test(body.error)
+            !/[A-Za-z]+Exception$/i.test(body.error) &&
+            !isTechnicalHttpMessage(body.error)
               ? body.error
               : statusLabel;
         } else {
