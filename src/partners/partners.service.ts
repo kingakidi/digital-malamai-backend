@@ -30,6 +30,7 @@ import { PublicPartnerView } from './types/public-partner-view.type';
 import { toPublicPartner } from './utils/partner-view.util';
 import { AccountWelcomeService } from '../mail/account-welcome.service';
 import { S3Service } from '../media/s3.service';
+import { AccessCode } from '../access-codes/entities/access-code.entity';
 
 const ALLOWED_SORT_FIELDS = [
   'id',
@@ -39,6 +40,11 @@ const ALLOWED_SORT_FIELDS = [
   'createdAt',
   'updatedAt',
 ];
+
+export type PartnerWithCounts = Partner & {
+  studentCount: number;
+  accessCodeCount: number;
+};
 
 @Injectable()
 export class PartnersService {
@@ -210,7 +216,7 @@ export class PartnersService {
 
   async findAll(
     query: PaginationQueryDto,
-  ): Promise<PaginatedResult<Partner>> {
+  ): Promise<PaginatedResult<PartnerWithCounts>> {
     const skip = getPaginationSkip(query.page, query.limit);
     const sortBy = ALLOWED_SORT_FIELDS.includes(query.sortBy ?? '')
       ? query.sortBy!
@@ -234,11 +240,14 @@ export class PartnersService {
       .take(query.limit);
 
     const [items, total] = await qb.getManyAndCount();
-    return buildPaginatedResult(items, total, query);
+    const withCounts = await this.attachPartnerCounts(items);
+    return buildPaginatedResult(withCounts, total, query);
   }
 
-  async findOne(id: string): Promise<Partner> {
-    return this.findOneEntity(id);
+  async findOne(id: string): Promise<PartnerWithCounts> {
+    const partner = await this.findOneEntity(id);
+    const [withCounts] = await this.attachPartnerCounts([partner]);
+    return withCounts;
   }
 
   async findOnePublic(id: string): Promise<PublicPartnerView> {
@@ -379,5 +388,48 @@ export class PartnersService {
     await this.deletePartnerLogoFromS3(previousLogoUrl);
 
     return savedPartner;
+  }
+
+  private async attachPartnerCounts(
+    partners: Partner[],
+  ): Promise<PartnerWithCounts[]> {
+    if (partners.length === 0) {
+      return [];
+    }
+
+    const ids = partners.map((partner) => partner.id);
+
+    const studentRows = await this.dataSource
+      .getRepository(User)
+      .createQueryBuilder('user')
+      .innerJoin('user.role', 'role')
+      .select('user.partnerId', 'partnerId')
+      .addSelect('COUNT(*)', 'cnt')
+      .where('user.partnerId IN (:...ids)', { ids })
+      .andWhere('role.name = :roleName', { roleName: RoleName.STUDENT })
+      .groupBy('user.partnerId')
+      .getRawMany<{ partnerId: string; cnt: string }>();
+
+    const accessRows = await this.dataSource
+      .getRepository(AccessCode)
+      .createQueryBuilder('accessCode')
+      .select('accessCode.partnerId', 'partnerId')
+      .addSelect('COUNT(*)', 'cnt')
+      .where('accessCode.partnerId IN (:...ids)', { ids })
+      .groupBy('accessCode.partnerId')
+      .getRawMany<{ partnerId: string; cnt: string }>();
+
+    const studentMap = new Map(
+      studentRows.map((row) => [row.partnerId, Number(row.cnt)]),
+    );
+    const accessMap = new Map(
+      accessRows.map((row) => [row.partnerId, Number(row.cnt)]),
+    );
+
+    return partners.map((partner) => ({
+      ...partner,
+      studentCount: studentMap.get(partner.id) ?? 0,
+      accessCodeCount: accessMap.get(partner.id) ?? 0,
+    }));
   }
 }

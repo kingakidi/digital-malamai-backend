@@ -231,6 +231,16 @@ export class PartnerResponseDto {
 
   @ApiProperty()
   updatedAt: Date;
+
+  @ApiPropertyOptional({
+    description: 'Number of students linked to this partner',
+  })
+  studentCount?: number;
+
+  @ApiPropertyOptional({
+    description: 'Number of access codes for this partner',
+  })
+  accessCodeCount?: number;
 }
 
 export class CreatePartnerWithUserResponseDto {

@@ -29,4 +29,6 @@ export class SystemSetting {
 
 export const SYSTEM_SETTING_KEYS = {
   ONBOARDING_FEE: 'Onboarding Fee',
+  COURSE_LESSON_WATCH_IN_APP: 'Course Lesson Watch In App',
+  COURSE_WHATSAPP_DELIVERY: 'Course WhatsApp Delivery',
 } as const;

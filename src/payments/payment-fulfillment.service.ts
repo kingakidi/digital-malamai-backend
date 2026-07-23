@@ -1172,6 +1172,9 @@ export class PaymentFulfillmentService {
 
     let emailSent = false;
     let whatsappSent = false;
+    const whatsappEnabled = (
+      await this.settingsService.getCourseWhatsappDelivery()
+    ).enabled;
 
     try {
       await this.mailService.sendTemplateMail(user.email, 'course-delivery', {
@@ -1181,7 +1184,7 @@ export class PaymentFulfillmentService {
       });
       emailSent = true;
 
-      if (user.phone) {
+      if (whatsappEnabled && user.phone) {
         const whatsappBody = links
           ? `Your course "${courseTitle}" is ready.\n\n${links}`
           : `Your course "${courseTitle}" is ready. Check your email for video links.`;
@@ -1210,9 +1213,6 @@ export class PaymentFulfillmentService {
     return { emailSent, whatsappSent };
   }
 
-  /**
-   * Re-send lesson links to an enrolled student's email and WhatsApp.
-   */
   async resendCourseAccess(userId: string, courseId: string) {
     const enrollment = await this.coursesService.findEnrollment(
       userId,
