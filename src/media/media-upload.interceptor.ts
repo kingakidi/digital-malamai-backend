@@ -11,9 +11,6 @@ import * as multer from 'multer';
 import type { Request, Response } from 'express';
 import { S3Service } from './s3.service';
 
-/**
- * Fileam `uploadMiddleware`: memory storage, field `file`, size = MEDIA max.
- */
 @Injectable()
 export class MediaUploadInterceptor implements NestInterceptor {
   constructor(private readonly s3Service: S3Service) {}

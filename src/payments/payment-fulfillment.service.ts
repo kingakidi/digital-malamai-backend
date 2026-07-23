@@ -23,6 +23,7 @@ import {
 } from '../common/types/payment.types';
 import { RoleName } from '../common/types/permission.types';
 import { CourseEnrollment } from '../courses/entities/course-enrollment.entity';
+import { Course } from '../courses/entities/course.entity';
 import { CoursesService } from '../courses/courses.service';
 import { MailService } from '../mail/mail.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -729,15 +730,62 @@ export class PaymentFulfillmentService {
     existing: PaymentTransaction | null,
   ) {
     if (user.onboardingStatus !== OnboardingStatus.ONBOARDED) {
-      throw new BadRequestException('Student must complete onboarding before purchasing courses');
+      throw new BadRequestException(
+        'Student must complete onboarding before purchasing courses',
+      );
     }
 
-    const courseId = metadata.courseId;
+    const courseIds = this.resolveCourseIds(metadata);
 
-    if (!courseId) {
-      throw new BadRequestException('Payment metadata must include courseId for course payments');
+    if (courseIds.length === 0) {
+      throw new BadRequestException(
+        'Payment metadata must include courseId for course payments',
+      );
     }
 
+    if (courseIds.length === 1) {
+      return this.fulfillSingleCourse(
+        user,
+        flutterwaveData,
+        metadata,
+        courseIds[0],
+        source,
+        existing,
+      );
+    }
+
+    return this.fulfillCartCourses(
+      user,
+      flutterwaveData,
+      metadata,
+      courseIds,
+      source,
+      existing,
+    );
+  }
+
+  private resolveCourseIds(metadata: PaymentMetadata): string[] {
+    const fromList =
+      metadata.courseIds
+        ?.split(',')
+        .map((id) => id.trim())
+        .filter(Boolean) ?? [];
+
+    if (fromList.length > 0) {
+      return [...new Set(fromList)];
+    }
+
+    return metadata.courseId ? [metadata.courseId] : [];
+  }
+
+  private async fulfillSingleCourse(
+    user: User,
+    flutterwaveData: FlutterwaveVerifyData,
+    metadata: PaymentMetadata,
+    courseId: string,
+    source: 'api' | 'webhook' | 'sync',
+    existing: PaymentTransaction | null,
+  ) {
     const course = await this.coursesService.findPublishedCourse(courseId);
     const existingEnrollment = await this.coursesService.findEnrollment(
       user.id,
@@ -783,6 +831,8 @@ export class PaymentFulfillmentService {
         return {
           ...this.serializeTransaction(transaction),
           enrollmentId: existingEnrollment?.id ?? null,
+          courseIds: [course.id],
+          enrollmentIds: existingEnrollment?.id ? [existingEnrollment.id] : [],
         };
       }
 
@@ -814,6 +864,8 @@ export class PaymentFulfillmentService {
       return {
         ...this.serializeTransaction(transaction),
         enrollmentId: enrollment.id,
+        courseIds: [course.id],
+        enrollmentIds: [enrollment.id],
       };
     });
 
@@ -822,6 +874,122 @@ export class PaymentFulfillmentService {
         pendingDelivery.user,
         pendingDelivery.courseId,
         pendingDelivery.courseTitle,
+      );
+    }
+
+    return result;
+  }
+
+  private async fulfillCartCourses(
+    user: User,
+    flutterwaveData: FlutterwaveVerifyData,
+    metadata: PaymentMetadata,
+    courseIds: string[],
+    source: 'api' | 'webhook' | 'sync',
+    existing: PaymentTransaction | null,
+  ) {
+    const courses: Course[] = [];
+    for (const courseId of courseIds) {
+      courses.push(await this.coursesService.findPublishedCourse(courseId));
+    }
+
+    const expectedAmount = courses.reduce(
+      (sum, course) =>
+        sum + this.coursesService.getExpectedCourseAmount(course),
+      0,
+    );
+    const paidAmount = Number(flutterwaveData.amount);
+
+    if (paidAmount + 0.001 < expectedAmount) {
+      throw new BadRequestException(
+        `Paid amount ${paidAmount} is less than expected cart total ${expectedAmount}`,
+      );
+    }
+
+    const partner = user.partnerId
+      ? await this.partnersService.findOneEntity(user.partnerId)
+      : null;
+
+    const pendingDeliveries: Array<{
+      user: User;
+      courseId: string;
+      courseTitle: string;
+    }> = [];
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      const transaction = await this.saveTransaction(manager, {
+        existing,
+        flutterwaveData,
+        paidFor: PaidFor.COURSE,
+        user,
+        partner,
+        courseId: courses[0]?.id ?? null,
+        partnerCut: 0,
+        platformCut: paidAmount,
+        metadata: {
+          ...metadata,
+          courseId: courses[0]?.id,
+          courseIds: courseIds.join(','),
+        },
+        source,
+      });
+
+      if (transaction.fulfillmentCompleted) {
+        return {
+          ...this.serializeTransaction(transaction),
+          enrollmentId: null,
+          courseIds,
+          enrollmentIds: [] as string[],
+        };
+      }
+
+      const enrollmentIds: string[] = [];
+
+      for (const course of courses) {
+        let enrollment = await this.coursesService.findEnrollment(
+          user.id,
+          course.id,
+        );
+
+        if (!enrollment) {
+          enrollment = manager.create(CourseEnrollment, {
+            userId: user.id,
+            courseId: course.id,
+            paymentTransactionId: transaction.id,
+            enrolledAt: new Date(),
+            paymentStatus: PaymentStatus.SUCCESS,
+            unlockedAt: new Date(),
+          });
+          await manager.save(enrollment);
+
+          if (source !== 'sync') {
+            pendingDeliveries.push({
+              user,
+              courseId: course.id,
+              courseTitle: course.title,
+            });
+          }
+        }
+
+        enrollmentIds.push(enrollment.id);
+      }
+
+      transaction.fulfillmentCompleted = true;
+      await manager.save(transaction);
+
+      return {
+        ...this.serializeTransaction(transaction),
+        enrollmentId: enrollmentIds[0] ?? null,
+        courseIds,
+        enrollmentIds,
+      };
+    });
+
+    for (const delivery of pendingDeliveries) {
+      await this.deliverCourseAccess(
+        delivery.user,
+        delivery.courseId,
+        delivery.courseTitle,
       );
     }
 

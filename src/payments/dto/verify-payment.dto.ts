@@ -11,4 +11,21 @@ export class VerifyPaymentDto {
   @IsOptional()
   @IsString()
   txRef?: string;
+
+  @ApiPropertyOptional({ description: 'onboarding | course' })
+  @IsOptional()
+  @IsString()
+  paidFor?: string;
+
+  @ApiPropertyOptional({ description: 'Primary course id for course payments' })
+  @IsOptional()
+  @IsString()
+  courseId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Comma-separated course ids for cart checkout',
+  })
+  @IsOptional()
+  @IsString()
+  courseIds?: string;
 }

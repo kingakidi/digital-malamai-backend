@@ -65,6 +65,17 @@ export class PartnerAccessCodesController {
   getStats(@CurrentUser() user: AuthenticatedUser) {
     return this.accessCodesService.getStatsForPartner(user.partnerId!);
   }
+
+  @Get(':id')
+  @ApiOkData(AccessCodeResponseDto)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.READ)
+  @ResponseMessage('Access code retrieved successfully')
+  findOne(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.accessCodesService.findOneForPartner(user.partnerId!, id);
+  }
 }
 
 @ApiTags('admin/access-codes')
@@ -88,6 +99,14 @@ export class AdminGlobalAccessCodesController {
   @ResponseMessage('Access code stats retrieved successfully')
   getStats() {
     return this.accessCodesService.getStats();
+  }
+
+  @Get(':id')
+  @ApiOkData(AccessCodeResponseDto)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.READ)
+  @ResponseMessage('Access code retrieved successfully')
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.accessCodesService.findOne(id);
   }
 
   @Post()

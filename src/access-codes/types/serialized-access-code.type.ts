@@ -15,6 +15,17 @@ export interface SerializedAccessCode {
   student: SerializedAccessCodeStudent | null;
 }
 
+export interface SerializedAccessCodePartner {
+  id: string;
+  firstName: string;
+  lastName: string;
+  logoUrl: string | null;
+}
+
+export interface SerializedAccessCodeDetail extends SerializedAccessCode {
+  partner: SerializedAccessCodePartner;
+}
+
 export interface AccessCodeStats {
   total: number;
   used: number;

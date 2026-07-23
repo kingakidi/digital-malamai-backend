@@ -53,6 +53,18 @@ export class AdminUsersController {
     }));
   }
 
+  @Get(':id')
+  @ApiOkData(UserResponseDto)
+  @ResponseMessage('Staff account retrieved successfully')
+  findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.userService
+      .findOne(id, user)
+      .then((entry) => this.userService.sanitizeUser(entry));
+  }
+
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiCreatedData(UserResponseDto)

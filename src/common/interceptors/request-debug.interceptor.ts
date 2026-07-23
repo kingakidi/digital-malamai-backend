@@ -66,18 +66,25 @@ export class RequestDebugInterceptor implements NestInterceptor {
           summary ? `| ${summary}` : '',
         );
       }),
-      catchError((error: { status?: number; message?: string }) => {
+      catchError((error: unknown) => {
         const ms = Date.now() - startedAt;
+        const summary = summarizeError(error);
+
         console.log(
           '[RESPONSE]',
           request.method,
           request.originalUrl,
           '|',
-          error.status ?? 'ERROR',
+          summary.status,
           `| ${ms}ms`,
           '|',
-          error.message ?? 'Request failed',
+          summary.message,
         );
+
+        if (summary.detail) {
+          console.error('[RESPONSE] error detail:', summary.detail);
+        }
+
         return throwError(() => error);
       }),
     );
@@ -116,4 +123,72 @@ export class RequestDebugInterceptor implements NestInterceptor {
 
     return null;
   }
+}
+
+function summarizeError(error: unknown): {
+  status: number | string;
+  message: string;
+  detail?: string;
+} {
+  if (!error || typeof error !== 'object') {
+    return { status: 'ERROR', message: String(error) };
+  }
+
+  const err = error as {
+    status?: number;
+    message?: string | string[];
+    name?: string;
+    stack?: string;
+    response?: unknown;
+    $metadata?: { httpStatusCode?: number; requestId?: string };
+    Code?: string;
+    code?: string;
+  };
+
+  const status = err.status ?? err.$metadata?.httpStatusCode ?? 'ERROR';
+  let message = 'Request failed';
+
+  if (typeof err.message === 'string' && err.message.trim()) {
+    message = err.message;
+  } else if (Array.isArray(err.message) && err.message.length) {
+    message = err.message.join('; ');
+  } else if (err.name) {
+    message = err.name;
+  }
+
+  // Prefer structured AWS/SDK fields over a bare "UnknownError" message.
+  if (message === 'UnknownError' || err.$metadata) {
+    const bits = [
+      err.name,
+      err.Code ?? err.code,
+      err.$metadata?.httpStatusCode
+        ? `HTTP ${err.$metadata.httpStatusCode}`
+        : null,
+      err.$metadata?.requestId
+        ? `requestId=${err.$metadata.requestId}`
+        : null,
+    ].filter(Boolean);
+    if (bits.length) {
+      message = bits.join(' | ');
+    }
+  }
+
+  const detailParts: string[] = [];
+  if (err.response && typeof err.response === 'object') {
+    const body = err.response as { message?: string | string[] };
+    if (typeof body.message === 'string') {
+      detailParts.push(body.message);
+    } else if (Array.isArray(body.message)) {
+      detailParts.push(body.message.join('; '));
+    }
+  }
+  if (err.stack) {
+    detailParts.push(err.stack.split('\n').slice(0, 8).join('\n'));
+  }
+
+  return {
+    status,
+    message,
+    detail: detailParts.length ? detailParts.join('\n') : undefined,
+  };
 }

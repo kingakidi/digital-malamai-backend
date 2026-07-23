@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { PaginatedResult } from '../common/interfaces/pagination.interface';
 import { SortOrder } from '../common/types/sort-order.type';
@@ -21,6 +21,7 @@ import { AccessCode } from './entities/access-code.entity';
 import {
   AccessCodeStats,
   SerializedAccessCode,
+  SerializedAccessCodeDetail,
 } from './types/serialized-access-code.type';
 
 const MAX_SINGLE_INSERT_ATTEMPTS = 10;
@@ -110,6 +111,8 @@ export class AccessCodesService {
       });
     }
 
+    this.applyStatusFilter(qb, query.status);
+
     qb.orderBy(`accessCode.${sortBy}`, query.sortOrder ?? SortOrder.DESC)
       .skip(skip)
       .take(query.limit);
@@ -145,6 +148,8 @@ export class AccessCodesService {
       });
     }
 
+    this.applyStatusFilter(qb, query.status);
+
     qb.orderBy(`accessCode.${sortBy}`, query.sortOrder ?? SortOrder.DESC)
       .skip(skip)
       .take(query.limit);
@@ -156,6 +161,35 @@ export class AccessCodesService {
       total,
       query,
     );
+  }
+
+  async findOne(id: string): Promise<SerializedAccessCodeDetail> {
+    const accessCode = await this.accessCodesRepository.findOne({
+      where: { id },
+      relations: ['student', 'partner'],
+    });
+
+    if (!accessCode) {
+      throw new NotFoundException('Access code not found');
+    }
+
+    return this.serializeDetail(accessCode);
+  }
+
+  async findOneForPartner(
+    partnerId: string,
+    id: string,
+  ): Promise<SerializedAccessCodeDetail> {
+    const accessCode = await this.accessCodesRepository.findOne({
+      where: { id, partnerId },
+      relations: ['student', 'partner'],
+    });
+
+    if (!accessCode) {
+      throw new NotFoundException('Access code not found');
+    }
+
+    return this.serializeDetail(accessCode);
   }
 
   async getStats(): Promise<AccessCodeStats> {
@@ -404,6 +438,34 @@ export class AccessCodesService {
     );
   }
 
+  private applyStatusFilter(
+    qb: SelectQueryBuilder<AccessCode>,
+    status?: string,
+  ): void {
+    if (!status) return;
+
+    const now = new Date();
+
+    if (status === 'used') {
+      qb.andWhere('accessCode.isUsed = :isUsed', { isUsed: true });
+      return;
+    }
+
+    if (status === 'expired') {
+      qb.andWhere('accessCode.isUsed = :isUsed', { isUsed: false })
+        .andWhere('accessCode.expiresAt IS NOT NULL')
+        .andWhere('accessCode.expiresAt < :now', { now });
+      return;
+    }
+
+    if (status === 'available') {
+      qb.andWhere('accessCode.isUsed = :isUsed', { isUsed: false }).andWhere(
+        '(accessCode.expiresAt IS NULL OR accessCode.expiresAt >= :now)',
+        { now },
+      );
+    }
+  }
+
   private serialize(accessCode: AccessCode): SerializedAccessCode {
     return {
       id: accessCode.id,
@@ -420,6 +482,27 @@ export class AccessCodesService {
             email: accessCode.student.email,
           }
         : null,
+    };
+  }
+
+  private serializeDetail(accessCode: AccessCode): SerializedAccessCodeDetail {
+    const partner = accessCode.partner;
+
+    return {
+      ...this.serialize(accessCode),
+      partner: partner
+        ? {
+            id: partner.id,
+            firstName: partner.firstName,
+            lastName: partner.lastName,
+            logoUrl: partner.logoUrl ?? null,
+          }
+        : {
+            id: '',
+            firstName: 'System',
+            lastName: '',
+            logoUrl: null,
+          },
     };
   }
 }

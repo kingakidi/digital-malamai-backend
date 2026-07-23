@@ -7,6 +7,7 @@ import { CourseEnrollment } from '../courses/entities/course-enrollment.entity';
 import { CourseVideo } from '../courses/entities/course-video.entity';
 import { Course } from '../courses/entities/course.entity';
 import { Notification } from '../notifications/entities/notification.entity';
+import { NewsletterSubscriber } from '../newsletter/entities/newsletter-subscriber.entity';
 import { Otp } from '../otps/entities/otp.entity';
 import { Partner } from '../partners/entities/partner.entity';
 import { PaymentTransaction } from '../payments/entities/payment-transaction.entity';
@@ -37,6 +38,7 @@ export default new DataSource({
     CourseEnrollment,
     PaymentTransaction,
     PaymentWebhookEvent,
+    NewsletterSubscriber,
   ],
   migrations: [join(__dirname, 'migrations', '*.{ts,js}')],
   synchronize: false,

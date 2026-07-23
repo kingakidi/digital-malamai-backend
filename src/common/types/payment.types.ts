@@ -28,6 +28,8 @@ export interface PaymentMetadata {
   paidFor?: PaidFor | string;
   email?: string;
   courseId?: string;
+  /** Comma-separated course UUIDs for multi-course cart checkout */
+  courseIds?: string;
   partnerId?: string;
   accessCode?: string;
   fullName?: string;

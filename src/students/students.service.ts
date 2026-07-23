@@ -323,6 +323,19 @@ export class StudentsService {
     return this.usersRepository.save(user);
   }
 
+  async findStudentById(id: string) {
+    const user = await this.usersRepository.findOne({
+      where: { id },
+      relations: ['role', 'partner'],
+    });
+
+    if (!user || user.role.name !== RoleName.STUDENT) {
+      throw new NotFoundException(`Student ${id} not found`);
+    }
+
+    return this.userService.sanitizeUser(user);
+  }
+
   private splitFullName(fullName: string): {
     firstName: string;
     lastName: string;
