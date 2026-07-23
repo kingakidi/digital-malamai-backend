@@ -914,6 +914,29 @@ export class PaymentFulfillmentService {
       courses.push(await this.coursesService.findPublishedCourse(courseId));
     }
 
+    const alreadyEnrolledIds: string[] = [];
+    for (const course of courses) {
+      const enrollment = await this.coursesService.findEnrollment(
+        user.id,
+        course.id,
+      );
+      if (enrollment) {
+        alreadyEnrolledIds.push(course.id);
+      }
+    }
+
+    // New payment (no existing tx row) must not charge again for owned courses.
+    if (!existing && alreadyEnrolledIds.length > 0) {
+      if (alreadyEnrolledIds.length === courses.length) {
+        throw new ConflictException(
+          'You are already enrolled in all courses in this payment',
+        );
+      }
+      throw new ConflictException(
+        'You are already enrolled in one or more courses in this cart. Remove them and try again.',
+      );
+    }
+
     const expectedAmount = courses.reduce(
       (sum, course) =>
         sum + this.coursesService.getExpectedCourseAmount(course),
