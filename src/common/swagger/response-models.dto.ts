@@ -281,6 +281,9 @@ export class AccessCodeResponseDto {
   @ApiPropertyOptional({ nullable: true })
   expiresAt: Date | null;
 
+  @ApiPropertyOptional({ nullable: true })
+  exportedAt: Date | null;
+
   @ApiProperty()
   createdAt: Date;
 
@@ -300,6 +303,27 @@ export class AccessCodeStatsResponseDto {
 
   @ApiProperty()
   expired: number;
+
+  @ApiProperty()
+  exported: number;
+
+  @ApiProperty({ description: 'Unused, not expired, not yet exported' })
+  readyToExport: number;
+
+  @ApiProperty({
+    description: 'Unused, not expired, previously exported (re-exportable)',
+  })
+  reexportable: number;
+}
+
+export class ExportUnusedAccessCodesResultDto {
+  @ApiProperty({ type: [String], description: 'Unused access code values' })
+  codes: string[];
+}
+
+export class MarkAccessCodesExportedResultDto {
+  @ApiProperty()
+  marked: number;
 }
 
 export class GenerateAccessCodesResultDto {

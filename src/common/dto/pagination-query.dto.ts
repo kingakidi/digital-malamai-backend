@@ -5,6 +5,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsDateString,
   Max,
   Min,
 } from 'class-validator';
@@ -55,4 +56,14 @@ export class PaginationQueryDto {
   @IsOptional()
   @IsString()
   role?: string;
+
+  @ApiPropertyOptional({ example: '2026-01-01', description: 'Filter by createdAt from (inclusive)' })
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @ApiPropertyOptional({ example: '2026-12-31', description: 'Filter by createdAt to (inclusive)' })
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
 }

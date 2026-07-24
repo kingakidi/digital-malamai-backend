@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { CurrentUser } from '../common/abac/decorators/current-user.decorator';
 import { RequirePermission } from '../common/abac/decorators/require-permission.decorator';
 import { RequireRole } from '../common/abac/decorators/require-role.decorator';
@@ -33,10 +34,15 @@ import {
   AccessCodeResponseDto,
   AccessCodeStatsResponseDto,
   DeleteAccessCodesResultDto,
+  ExportUnusedAccessCodesResultDto,
+  MarkAccessCodesExportedResultDto,
   GenerateAccessCodesResultDto,
 } from '../common/swagger';
 import { DeleteAccessCodesDto } from './dto/delete-access-codes.dto';
+import { AccessCodesForExportQueryDto } from './dto/access-codes-for-export-query.dto';
+import { ExportUnusedAccessCodesDto } from './dto/export-unused-access-codes.dto';
 import { GenerateAccessCodesDto } from './dto/generate-access-codes.dto';
+import { MarkAccessCodesExportedDto } from './dto/mark-access-codes-exported.dto';
 import { AccessCodesService } from './access-codes.service';
 
 @ApiTags('partners/access-codes')
@@ -99,6 +105,38 @@ export class AdminGlobalAccessCodesController {
   @ResponseMessage('Access code stats retrieved successfully')
   getStats() {
     return this.accessCodesService.getStats();
+  }
+
+  /**
+   * Dedicated export browse route (limit default/max 100). Not rate-limited.
+   * Do not use GET /admin/access-codes for bulk export paging.
+   */
+  @SkipThrottle({ default: true })
+  @Get('for-export')
+  @ApiOkPaginated(AccessCodeResponseDto)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.READ)
+  @ResponseMessage('Ready access codes retrieved successfully')
+  findReadyForExport(@Query() query: AccessCodesForExportQueryDto) {
+    return this.accessCodesService.findReadyCodesForExport(query);
+  }
+
+  /** Single-request bulk export; marks codes exported. Not rate-limited. */
+  @SkipThrottle({ default: true })
+  @Get('export')
+  @ApiOkData(ExportUnusedAccessCodesResultDto)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.READ)
+  @ResponseMessage('Unused access codes exported successfully')
+  exportUnused(@Query() query: ExportUnusedAccessCodesDto) {
+    return this.accessCodesService.listUnusedCodesForExport(query);
+  }
+
+  @SkipThrottle({ default: true })
+  @Post('mark-exported')
+  @ApiOkData(MarkAccessCodesExportedResultDto)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.READ)
+  @ResponseMessage('Access codes marked as exported successfully')
+  markExported(@Body() dto: MarkAccessCodesExportedDto) {
+    return this.accessCodesService.markCodesExported(dto.codes);
   }
 
   @Get(':id')

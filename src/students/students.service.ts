@@ -244,6 +244,15 @@ export class StudentsService {
       );
     }
 
+    if (query.dateFrom) {
+      qb.andWhere('user.createdAt >= :dateFrom', { dateFrom: query.dateFrom });
+    }
+    if (query.dateTo) {
+      qb.andWhere('user.createdAt <= :dateTo', {
+        dateTo: `${query.dateTo} 23:59:59`,
+      });
+    }
+
     qb.orderBy('user.createdAt', query.sortOrder ?? SortOrder.DESC)
       .skip(skip)
       .take(query.limit);
@@ -254,6 +263,19 @@ export class StudentsService {
       total,
       query,
     );
+  }
+
+  async findStudentForPartner(partnerId: string, id: string) {
+    const user = await this.usersRepository.findOne({
+      where: { id, partnerId },
+      relations: ['role', 'partner'],
+    });
+
+    if (!user || user.role.name !== RoleName.STUDENT) {
+      throw new NotFoundException(`Student ${id} not found`);
+    }
+
+    return this.userService.sanitizeUser(user);
   }
 
   private async assertRegistrationValid(dto: RegisterStudentDto) {
