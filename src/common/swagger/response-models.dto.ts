@@ -302,6 +302,11 @@ export class AccessCodeStatsResponseDto {
   expired: number;
 }
 
+export class ExportUnusedAccessCodesResultDto {
+  @ApiProperty({ type: [String], description: 'Unused access code values' })
+  codes: string[];
+}
+
 export class GenerateAccessCodesResultDto {
   @ApiPropertyOptional({ format: 'uuid', nullable: true })
   partnerId: string | null;

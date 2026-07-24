@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { CurrentUser } from '../common/abac/decorators/current-user.decorator';
 import { RequirePermission } from '../common/abac/decorators/require-permission.decorator';
 import { RequireRole } from '../common/abac/decorators/require-role.decorator';
@@ -33,9 +34,11 @@ import {
   AccessCodeResponseDto,
   AccessCodeStatsResponseDto,
   DeleteAccessCodesResultDto,
+  ExportUnusedAccessCodesResultDto,
   GenerateAccessCodesResultDto,
 } from '../common/swagger';
 import { DeleteAccessCodesDto } from './dto/delete-access-codes.dto';
+import { ExportUnusedAccessCodesDto } from './dto/export-unused-access-codes.dto';
 import { GenerateAccessCodesDto } from './dto/generate-access-codes.dto';
 import { AccessCodesService } from './access-codes.service';
 
@@ -99,6 +102,15 @@ export class AdminGlobalAccessCodesController {
   @ResponseMessage('Access code stats retrieved successfully')
   getStats() {
     return this.accessCodesService.getStats();
+  }
+
+  @SkipThrottle()
+  @Get('export')
+  @ApiOkData(ExportUnusedAccessCodesResultDto)
+  @RequirePermission(PermissionResource.ACCESS_CODES, PermissionAction.READ)
+  @ResponseMessage('Unused access codes exported successfully')
+  exportUnused(@Query() query: ExportUnusedAccessCodesDto) {
+    return this.accessCodesService.listUnusedCodesForExport(query.count);
   }
 
   @Get(':id')

@@ -219,6 +219,27 @@ export class AccessCodesService {
     };
   }
 
+  /**
+   * Bulk fetch unused (available) codes for export in a single query.
+   * Avoids paginated list endpoints that trip rate limits on large exports.
+   */
+  async listUnusedCodesForExport(count: number): Promise<{ codes: string[] }> {
+    const now = new Date();
+    const rows = await this.accessCodesRepository
+      .createQueryBuilder('accessCode')
+      .select('accessCode.code', 'code')
+      .where('accessCode.isUsed = :isUsed', { isUsed: false })
+      .andWhere(
+        '(accessCode.expiresAt IS NULL OR accessCode.expiresAt >= :now)',
+        { now },
+      )
+      .orderBy('accessCode.code', SortOrder.ASC)
+      .take(count)
+      .getRawMany<{ code: string }>();
+
+    return { codes: rows.map((row) => row.code) };
+  }
+
   async getStatsForPartner(partnerId: string): Promise<AccessCodeStats> {
     await this.partnersService.findOneEntity(partnerId);
 
