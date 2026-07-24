@@ -25,7 +25,13 @@ import {
 } from './types/serialized-access-code.type';
 
 const MAX_SINGLE_INSERT_ATTEMPTS = 10;
-const ALLOWED_SORT_FIELDS = ['createdAt', 'code', 'isUsed', 'expiresAt'];
+const ALLOWED_SORT_FIELDS = [
+  'createdAt',
+  'code',
+  'isUsed',
+  'expiresAt',
+  'exportedAt',
+];
 
 export interface GenerateAccessCodesResult {
   partnerId: string | null;
@@ -112,6 +118,7 @@ export class AccessCodesService {
     }
 
     this.applyStatusFilter(qb, query.status);
+    this.applyCreatedAtRange(qb, query.dateFrom, query.dateTo);
 
     qb.orderBy(`accessCode.${sortBy}`, query.sortOrder ?? SortOrder.DESC)
       .skip(skip)
@@ -150,6 +157,8 @@ export class AccessCodesService {
         { search: `%${query.search}%` },
       );
     }
+
+    this.applyCreatedAtRange(qb, query.dateFrom, query.dateTo);
 
     qb.orderBy(`accessCode.${sortBy}`, query.sortOrder ?? SortOrder.DESC)
       .skip(skip)
@@ -200,7 +209,7 @@ export class AccessCodesService {
   async getStats(): Promise<AccessCodeStats> {
     const now = new Date();
 
-    const [total, used, expired] = await Promise.all([
+    const [total, used, expired, exported, readyToExport] = await Promise.all([
       this.accessCodesRepository.count(),
       this.accessCodesRepository.count({ where: { isUsed: true } }),
       this.accessCodesRepository
@@ -209,6 +218,19 @@ export class AccessCodesService {
         .andWhere('accessCode.expiresAt IS NOT NULL')
         .andWhere('accessCode.expiresAt < :now', { now })
         .getCount(),
+      this.accessCodesRepository
+        .createQueryBuilder('accessCode')
+        .where('accessCode.exportedAt IS NOT NULL')
+        .getCount(),
+      this.accessCodesRepository
+        .createQueryBuilder('accessCode')
+        .where('accessCode.isUsed = :isUsed', { isUsed: false })
+        .andWhere('accessCode.exportedAt IS NULL')
+        .andWhere(
+          '(accessCode.expiresAt IS NULL OR accessCode.expiresAt >= :now)',
+          { now },
+        )
+        .getCount(),
     ]);
 
     return {
@@ -216,28 +238,118 @@ export class AccessCodesService {
       used,
       unused: total - used,
       expired,
+      exported,
+      readyToExport,
     };
   }
 
   /**
-   * Bulk fetch unused (available) codes for export in a single query.
-   * Avoids paginated list endpoints that trip rate limits on large exports.
+   * Paginated browse of ready-to-export codes (createdAt ASC).
+   * Separate from the normal list so export can use limit=100 without rate limits.
    */
-  async listUnusedCodesForExport(count: number): Promise<{ codes: string[] }> {
+  async findReadyCodesForExport(
+    query: {
+      page: number;
+      limit: number;
+      dateFrom?: string;
+      dateTo?: string;
+    },
+  ): Promise<PaginatedResult<SerializedAccessCode>> {
+    const skip = getPaginationSkip(query.page, query.limit);
     const now = new Date();
-    const rows = await this.accessCodesRepository
+
+    const qb = this.accessCodesRepository
       .createQueryBuilder('accessCode')
-      .select('accessCode.code', 'code')
+      .leftJoinAndSelect('accessCode.student', 'student')
       .where('accessCode.isUsed = :isUsed', { isUsed: false })
+      .andWhere('accessCode.exportedAt IS NULL')
       .andWhere(
         '(accessCode.expiresAt IS NULL OR accessCode.expiresAt >= :now)',
         { now },
-      )
-      .orderBy('accessCode.code', SortOrder.ASC)
-      .take(count)
-      .getRawMany<{ code: string }>();
+      );
 
-    return { codes: rows.map((row) => row.code) };
+    this.applyCreatedAtRange(qb, query.dateFrom, query.dateTo);
+
+    qb.orderBy('accessCode.createdAt', SortOrder.ASC)
+      .addOrderBy('accessCode.id', SortOrder.ASC)
+      .skip(skip)
+      .take(query.limit);
+
+    const [items, total] = await qb.getManyAndCount();
+
+    return buildPaginatedResult(
+      items.map((code) => this.serialize(code)),
+      total,
+      query,
+    );
+  }
+
+  /**
+   * Bulk-fetch unused, not-yet-exported codes (createdAt ASC) and mark them exported.
+   */
+  async listUnusedCodesForExport(input: {
+    count: number;
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<{ codes: string[] }> {
+    const now = new Date();
+
+    return this.accessCodesRepository.manager.transaction(async (manager) => {
+      const qb = manager
+        .createQueryBuilder(AccessCode, 'accessCode')
+        .where('accessCode.isUsed = :isUsed', { isUsed: false })
+        .andWhere('accessCode.exportedAt IS NULL')
+        .andWhere(
+          '(accessCode.expiresAt IS NULL OR accessCode.expiresAt >= :now)',
+          { now },
+        );
+
+      this.applyCreatedAtRange(qb, input.dateFrom, input.dateTo);
+
+      const rows = await qb
+        .orderBy('accessCode.createdAt', SortOrder.ASC)
+        .addOrderBy('accessCode.id', SortOrder.ASC)
+        .take(input.count)
+        .getMany();
+
+      if (rows.length === 0) {
+        return { codes: [] };
+      }
+
+      const exportedAt = new Date();
+      await manager
+        .createQueryBuilder()
+        .update(AccessCode)
+        .set({ exportedAt })
+        .whereInIds(rows.map((row) => row.id))
+        .andWhere('exportedAt IS NULL')
+        .execute();
+
+      return { codes: rows.map((row) => row.code) };
+    });
+  }
+
+  /** Mark specific ready codes as exported (used after for-export paging). */
+  async markCodesExported(codes: string[]): Promise<{ marked: number }> {
+    if (codes.length === 0) {
+      return { marked: 0 };
+    }
+
+    const unique = [...new Set(codes.map((code) => code.trim()).filter(Boolean))];
+    if (unique.length === 0) {
+      return { marked: 0 };
+    }
+
+    const result = await this.accessCodesRepository
+      .createQueryBuilder()
+      .update(AccessCode)
+      .set({ exportedAt: new Date() })
+      .where('code IN (:...codes)', { codes: unique })
+      .andWhere('isUsed = :isUsed', { isUsed: false })
+      .andWhere('exportedAt IS NULL')
+      .execute();
+
+    return { marked: result.affected ?? 0 };
   }
 
   async getStatsForPartner(partnerId: string): Promise<AccessCodeStats> {
@@ -255,6 +367,8 @@ export class AccessCodesService {
       used,
       unused: 0,
       expired: 0,
+      exported: 0,
+      readyToExport: 0,
     };
   }
 
@@ -477,11 +591,46 @@ export class AccessCodesService {
       return;
     }
 
+    if (status === 'exported') {
+      qb.andWhere('accessCode.exportedAt IS NOT NULL');
+      return;
+    }
+
+    if (status === 'unexported') {
+      qb.andWhere('accessCode.exportedAt IS NULL');
+      return;
+    }
+
+    if (status === 'ready') {
+      qb.andWhere('accessCode.isUsed = :isUsed', { isUsed: false })
+        .andWhere('accessCode.exportedAt IS NULL')
+        .andWhere(
+          '(accessCode.expiresAt IS NULL OR accessCode.expiresAt >= :now)',
+          { now },
+        );
+      return;
+    }
+
     if (status === 'available') {
       qb.andWhere('accessCode.isUsed = :isUsed', { isUsed: false }).andWhere(
         '(accessCode.expiresAt IS NULL OR accessCode.expiresAt >= :now)',
         { now },
       );
+    }
+  }
+
+  private applyCreatedAtRange(
+    qb: SelectQueryBuilder<AccessCode>,
+    dateFrom?: string,
+    dateTo?: string,
+  ): void {
+    if (dateFrom) {
+      qb.andWhere('accessCode.createdAt >= :dateFrom', { dateFrom });
+    }
+    if (dateTo) {
+      qb.andWhere('accessCode.createdAt <= :dateTo', {
+        dateTo: `${dateTo} 23:59:59`,
+      });
     }
   }
 
@@ -492,6 +641,7 @@ export class AccessCodesService {
       partnerId: accessCode.partnerId,
       isUsed: accessCode.isUsed,
       expiresAt: accessCode.expiresAt,
+      exportedAt: accessCode.exportedAt,
       createdAt: accessCode.createdAt,
       student: accessCode.student
         ? {

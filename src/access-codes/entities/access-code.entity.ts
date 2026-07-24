@@ -39,6 +39,9 @@ export class AccessCode {
   @Column({ type: 'datetime', nullable: true })
   expiresAt: Date | null;
 
+  @Column({ type: 'datetime', nullable: true })
+  exportedAt: Date | null;
+
   @CreateDateColumn()
   createdAt: Date;
 }

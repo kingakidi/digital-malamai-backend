@@ -11,6 +11,7 @@ export interface SerializedAccessCode {
   partnerId: string | null;
   isUsed: boolean;
   expiresAt: Date | null;
+  exportedAt: Date | null;
   createdAt: Date;
   student: SerializedAccessCodeStudent | null;
 }
@@ -31,4 +32,6 @@ export interface AccessCodeStats {
   used: number;
   unused: number;
   expired: number;
+  exported: number;
+  readyToExport: number;
 }

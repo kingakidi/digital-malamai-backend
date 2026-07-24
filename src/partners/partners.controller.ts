@@ -148,6 +148,17 @@ export class PartnerPortalController {
     return this.studentsService.findStudentsForPartner(user.partnerId!, query);
   }
 
+  @Get('students/:id')
+  @ApiOkData(UserResponseDto)
+  @RequirePermission(PermissionResource.PARTNERS, PermissionAction.READ)
+  @ResponseMessage('Partner student retrieved successfully')
+  findStudentById(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.studentsService.findStudentForPartner(user.partnerId!, id);
+  }
+
   @Get('enrollments')
   @ApiOkPaginated(CourseEnrollmentReportDto)
   @RequirePermission(PermissionResource.PARTNERS, PermissionAction.READ)
