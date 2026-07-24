@@ -67,7 +67,20 @@ export class MediaController {
     }
 
     const allowed = this.s3Service.getAllowedFileTypes();
-    const mimetype = file.mimetype || 'application/octet-stream';
+    const originalName = file.originalname || 'file';
+    const extension = originalName.split('.').pop()?.toLowerCase() ?? '';
+    let mimetype = file.mimetype || 'application/octet-stream';
+
+    if (
+      extension === 'svg' &&
+      (mimetype === 'application/octet-stream' ||
+        mimetype === 'text/plain' ||
+        mimetype === 'text/xml' ||
+        mimetype === 'application/xml' ||
+        !mimetype.startsWith('image/'))
+    ) {
+      mimetype = 'image/svg+xml';
+    }
 
     if (!(allowed as readonly string[]).includes(mimetype)) {
       throw new BadRequestException(
@@ -89,7 +102,7 @@ export class MediaController {
     const result = await this.s3Service.upload({
       buffer: file.buffer,
       mimetype,
-      originalName: file.originalname || 'file',
+      originalName,
       folder,
     });
 

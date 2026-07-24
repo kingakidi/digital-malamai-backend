@@ -3,6 +3,7 @@ import 'reflect-metadata';
 import { config } from 'dotenv';
 import { DataSource } from 'typeorm';
 import { AccessCode } from '../access-codes/entities/access-code.entity';
+import { CourseCategory } from '../courses/entities/course-category.entity';
 import { CourseEnrollment } from '../courses/entities/course-enrollment.entity';
 import { CourseVideo } from '../courses/entities/course-video.entity';
 import { Course } from '../courses/entities/course.entity';
@@ -34,6 +35,7 @@ export default new DataSource({
     Notification,
     SystemSetting,
     Course,
+    CourseCategory,
     CourseVideo,
     CourseEnrollment,
     PaymentTransaction,

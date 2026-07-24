@@ -367,6 +367,32 @@ export class CourseEnrollmentSummaryDto {
   unlockedAt: Date | null;
 }
 
+export class CourseCategoryResponseDto {
+  @ApiProperty({ format: 'uuid' })
+  id: string;
+
+  @ApiProperty()
+  name: string;
+
+  @ApiProperty()
+  slug: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  iconUrl: string | null;
+
+  @ApiProperty()
+  isDefault: boolean;
+
+  @ApiPropertyOptional({ description: 'Number of courses in this category' })
+  courseCount?: number;
+
+  @ApiProperty()
+  createdAt: Date;
+
+  @ApiProperty()
+  updatedAt: Date;
+}
+
 export class CourseWithEnrollmentResponseDto {
   @ApiProperty({ format: 'uuid' })
   id: string;
@@ -397,6 +423,12 @@ export class CourseWithEnrollmentResponseDto {
 
   @ApiProperty({ enum: CourseStatus })
   status: CourseStatus;
+
+  @ApiProperty({ format: 'uuid' })
+  categoryId: string;
+
+  @ApiPropertyOptional({ type: () => CourseCategoryResponseDto, nullable: true })
+  category?: CourseCategoryResponseDto | null;
 
   @ApiProperty()
   createdAt: Date;
@@ -435,6 +467,12 @@ export class CourseResponseDto {
 
   @ApiProperty({ enum: CourseStatus })
   status: CourseStatus;
+
+  @ApiProperty({ format: 'uuid' })
+  categoryId: string;
+
+  @ApiPropertyOptional({ type: () => CourseCategoryResponseDto })
+  category?: CourseCategoryResponseDto;
 
   @ApiProperty()
   createdAt: Date;

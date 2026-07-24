@@ -27,6 +27,7 @@ import { UpdateCourseDto } from './dto/update-course.dto';
 import { CourseEnrollment } from './entities/course-enrollment.entity';
 import { CourseVideo } from './entities/course-video.entity';
 import { Course } from './entities/course.entity';
+import { CourseCategoriesService } from './course-categories.service';
 import {
   CourseEnrollmentSummary,
   CourseWithEnrollmentView,
@@ -45,6 +46,7 @@ export class CoursesService {
     private readonly videosRepository: Repository<CourseVideo>,
     @InjectRepository(PaymentTransaction)
     private readonly transactionsRepository: Repository<PaymentTransaction>,
+    private readonly courseCategoriesService: CourseCategoriesService,
   ) {}
 
   // ─── Student reads ───────────────────────────────────────────────────────
@@ -52,6 +54,7 @@ export class CoursesService {
   async findPublishedCourse(id: string): Promise<Course> {
     const course = await this.coursesRepository.findOne({
       where: { id, status: CourseStatus.PUBLISHED },
+      relations: ['category'],
     });
 
     if (!course) {
@@ -72,12 +75,28 @@ export class CoursesService {
     });
   }
 
-  async findPublishedCoursesPublic(): Promise<CourseWithEnrollmentView[]> {
-    const courses = await this.coursesRepository.find({
-      where: { status: CourseStatus.PUBLISHED },
-      order: { createdAt: 'DESC' },
-    });
+  async findPublishedCoursesPublic(
+    category?: string,
+  ): Promise<CourseWithEnrollmentView[]> {
+    const qb = this.coursesRepository
+      .createQueryBuilder('course')
+      .leftJoinAndSelect('course.category', 'category')
+      .where('course.status = :status', { status: CourseStatus.PUBLISHED })
+      .orderBy('course.createdAt', SortOrder.DESC);
 
+    const categoryFilter = category?.trim();
+    if (categoryFilter) {
+      const matched =
+        await this.courseCategoriesService.findBySlugOrId(categoryFilter);
+      if (!matched) {
+        return [];
+      }
+      qb.andWhere('course.categoryId = :categoryId', {
+        categoryId: matched.id,
+      });
+    }
+
+    const courses = await qb.getMany();
     return courses.map((course) => this.toCourseWithEnrollment(course, null));
   }
 
@@ -91,6 +110,7 @@ export class CoursesService {
   ): Promise<CourseWithEnrollmentView> {
     const course = await this.coursesRepository.findOne({
       where: { slug, status: CourseStatus.PUBLISHED },
+      relations: ['category'],
     });
 
     if (!course) {
@@ -139,6 +159,10 @@ export class CoursesService {
       dto.slug ? slugify(dto.slug) : undefined,
     );
 
+    const category = dto.categoryId
+      ? await this.courseCategoriesService.assertCategoryExists(dto.categoryId)
+      : await this.courseCategoriesService.getGeneralCategory();
+
     const course = this.coursesRepository.create({
       slug,
       title: dto.title,
@@ -148,9 +172,11 @@ export class CoursesService {
       discount: dto.discount ?? 0,
       isFree: dto.isFree ?? false,
       status: CourseStatus.DRAFT,
+      categoryId: category.id,
     });
 
-    return this.coursesRepository.save(course);
+    const saved = await this.coursesRepository.save(course);
+    return this.findCourseById(saved.id);
   }
 
   async findAllCourses(query: PaginationQueryDto): Promise<PaginatedResult<Course>> {
@@ -161,6 +187,7 @@ export class CoursesService {
 
     const qb = this.coursesRepository
       .createQueryBuilder('course')
+      .leftJoinAndSelect('course.category', 'category')
       .loadRelationCountAndMap('course.enrollmentCount', 'course.enrollments');
 
     if (query.search) {
@@ -185,6 +212,7 @@ export class CoursesService {
   async findCourseById(id: string): Promise<Course> {
     const course = await this.coursesRepository
       .createQueryBuilder('course')
+      .leftJoinAndSelect('course.category', 'category')
       .loadRelationCountAndMap('course.enrollmentCount', 'course.enrollments')
       .where('course.id = :id', { id })
       .getOne();
@@ -223,13 +251,22 @@ export class CoursesService {
       course.isFree = dto.isFree;
     }
 
+    if (dto.categoryId !== undefined) {
+      const category = await this.courseCategoriesService.assertCategoryExists(
+        dto.categoryId,
+      );
+      course.category = category;
+      course.categoryId = category.id;
+    }
+
     if (dto.slug !== undefined) {
       course.slug = await this.resolveUniqueSlug(dto.slug, slugify(dto.slug), id);
     } else if (dto.title !== undefined) {
       course.slug = await this.resolveUniqueSlug(dto.title, undefined, id);
     }
 
-    return this.coursesRepository.save(course);
+    await this.coursesRepository.save(course);
+    return this.findCourseById(id);
   }
 
   async publishCourse(id: string, dto: PublishCourseDto): Promise<Course> {
@@ -541,6 +578,16 @@ export class CoursesService {
       isFree: course.isFree,
       effectivePrice: this.getExpectedCourseAmount(course),
       status: course.status,
+      categoryId: course.categoryId,
+      category: course.category
+        ? {
+            id: course.category.id,
+            name: course.category.name,
+            slug: course.category.slug,
+            iconUrl: course.category.iconUrl,
+            isDefault: course.category.isDefault,
+          }
+        : null,
       createdAt: course.createdAt,
       updatedAt: course.updatedAt,
       enrollment: this.buildEnrollmentSummary(enrollment),
