@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
 } from 'class-validator';
 
@@ -45,4 +46,12 @@ export class CreateCourseDto {
   @IsOptional()
   @IsBoolean()
   isFree?: boolean;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Course category id (defaults to General when omitted)',
+  })
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string;
 }

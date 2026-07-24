@@ -5,6 +5,14 @@ export interface CourseEnrollmentSummary {
   unlockedAt: Date | null;
 }
 
+export interface CourseCategorySummary {
+  id: string;
+  name: string;
+  slug: string;
+  iconUrl: string | null;
+  isDefault: boolean;
+}
+
 export interface CourseWithEnrollmentView {
   id: string;
   slug: string;
@@ -16,6 +24,8 @@ export interface CourseWithEnrollmentView {
   isFree: boolean;
   effectivePrice: number;
   status: string;
+  categoryId: string;
+  category: CourseCategorySummary | null;
   createdAt: Date;
   updatedAt: Date;
   enrollment: CourseEnrollmentSummary;

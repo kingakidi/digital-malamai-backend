@@ -2,11 +2,14 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { CourseStatus } from '../../common/types/payment.types';
+import { CourseCategory } from './course-category.entity';
 import { CourseEnrollment } from './course-enrollment.entity';
 import { CourseVideo } from './course-video.entity';
 
@@ -39,6 +42,16 @@ export class Course {
   @Column({ type: 'enum', enum: CourseStatus, default: CourseStatus.DRAFT })
   status: CourseStatus;
 
+  @Column({ type: 'uuid' })
+  categoryId: string;
+
+  @ManyToOne(() => CourseCategory, (category) => category.courses, {
+    nullable: false,
+    onDelete: 'RESTRICT',
+  })
+  @JoinColumn({ name: 'categoryId' })
+  category: CourseCategory;
+
   @OneToMany(() => CourseVideo, (video) => video.course)
   videos: CourseVideo[];
 
@@ -51,6 +64,5 @@ export class Course {
   @UpdateDateColumn()
   updatedAt: Date;
 
-  /** Populated by list queries via relation count — not a DB column. */
   enrollmentCount?: number;
 }

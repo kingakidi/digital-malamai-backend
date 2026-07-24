@@ -1,10 +1,11 @@
-import { Controller, Get, Param, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ResponseMessage } from '../common/decorators/response-message.decorator';
 import {
   ApiOkData,
   CourseWithEnrollmentResponseDto,
 } from '../common/swagger';
+import { PublicCoursesQueryDto } from './dto/public-courses-query.dto';
 import { CoursesService } from './courses.service';
 
 @ApiTags('courses')
@@ -15,8 +16,8 @@ export class CoursesController {
   @Get()
   @ApiOkData(CourseWithEnrollmentResponseDto, { isArray: true })
   @ResponseMessage('Courses retrieved successfully')
-  listPublished() {
-    return this.coursesService.findPublishedCoursesPublic();
+  listPublished(@Query() query: PublicCoursesQueryDto) {
+    return this.coursesService.findPublishedCoursesPublic(query.category);
   }
 
   @Get('slug/:slug')
