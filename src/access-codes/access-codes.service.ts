@@ -209,7 +209,8 @@ export class AccessCodesService {
   async getStats(): Promise<AccessCodeStats> {
     const now = new Date();
 
-    const [total, used, expired, exported, readyToExport] = await Promise.all([
+    const [total, used, expired, exported, readyToExport, reexportable] =
+      await Promise.all([
       this.accessCodesRepository.count(),
       this.accessCodesRepository.count({ where: { isUsed: true } }),
       this.accessCodesRepository
@@ -231,6 +232,15 @@ export class AccessCodesService {
           { now },
         )
         .getCount(),
+      this.accessCodesRepository
+        .createQueryBuilder('accessCode')
+        .where('accessCode.isUsed = :isUsed', { isUsed: false })
+        .andWhere('accessCode.exportedAt IS NOT NULL')
+        .andWhere(
+          '(accessCode.expiresAt IS NULL OR accessCode.expiresAt >= :now)',
+          { now },
+        )
+        .getCount(),
     ]);
 
     return {
@@ -240,11 +250,12 @@ export class AccessCodesService {
       expired,
       exported,
       readyToExport,
+      reexportable,
     };
   }
 
   /**
-   * Paginated browse of ready-to-export codes (createdAt ASC).
+   * Paginated browse of codes for export (createdAt ASC).
    * Separate from the normal list so export can use limit=100 without rate limits.
    */
   async findReadyCodesForExport(
@@ -253,20 +264,27 @@ export class AccessCodesService {
       limit: number;
       dateFrom?: string;
       dateTo?: string;
+      mode?: 'ready' | 'exported';
     },
   ): Promise<PaginatedResult<SerializedAccessCode>> {
     const skip = getPaginationSkip(query.page, query.limit);
     const now = new Date();
+    const mode = query.mode ?? 'ready';
 
     const qb = this.accessCodesRepository
       .createQueryBuilder('accessCode')
       .leftJoinAndSelect('accessCode.student', 'student')
       .where('accessCode.isUsed = :isUsed', { isUsed: false })
-      .andWhere('accessCode.exportedAt IS NULL')
       .andWhere(
         '(accessCode.expiresAt IS NULL OR accessCode.expiresAt >= :now)',
         { now },
       );
+
+    if (mode === 'exported') {
+      qb.andWhere('accessCode.exportedAt IS NOT NULL');
+    } else {
+      qb.andWhere('accessCode.exportedAt IS NULL');
+    }
 
     this.applyCreatedAtRange(qb, query.dateFrom, query.dateTo);
 
@@ -285,24 +303,32 @@ export class AccessCodesService {
   }
 
   /**
-   * Bulk-fetch unused, not-yet-exported codes (createdAt ASC) and mark them exported.
+   * Bulk-fetch unused codes for download (createdAt ASC).
+   * mode=ready marks them exported; mode=exported re-downloads without changing status.
    */
   async listUnusedCodesForExport(input: {
     count: number;
     dateFrom?: string;
     dateTo?: string;
+    mode?: 'ready' | 'exported';
   }): Promise<{ codes: string[] }> {
     const now = new Date();
+    const mode = input.mode ?? 'ready';
 
     return this.accessCodesRepository.manager.transaction(async (manager) => {
       const qb = manager
         .createQueryBuilder(AccessCode, 'accessCode')
         .where('accessCode.isUsed = :isUsed', { isUsed: false })
-        .andWhere('accessCode.exportedAt IS NULL')
         .andWhere(
           '(accessCode.expiresAt IS NULL OR accessCode.expiresAt >= :now)',
           { now },
         );
+
+      if (mode === 'exported') {
+        qb.andWhere('accessCode.exportedAt IS NOT NULL');
+      } else {
+        qb.andWhere('accessCode.exportedAt IS NULL');
+      }
 
       this.applyCreatedAtRange(qb, input.dateFrom, input.dateTo);
 
@@ -316,14 +342,16 @@ export class AccessCodesService {
         return { codes: [] };
       }
 
-      const exportedAt = new Date();
-      await manager
-        .createQueryBuilder()
-        .update(AccessCode)
-        .set({ exportedAt })
-        .whereInIds(rows.map((row) => row.id))
-        .andWhere('exportedAt IS NULL')
-        .execute();
+      if (mode === 'ready') {
+        const exportedAt = new Date();
+        await manager
+          .createQueryBuilder()
+          .update(AccessCode)
+          .set({ exportedAt })
+          .whereInIds(rows.map((row) => row.id))
+          .andWhere('exportedAt IS NULL')
+          .execute();
+      }
 
       return { codes: rows.map((row) => row.code) };
     });
@@ -369,6 +397,7 @@ export class AccessCodesService {
       expired: 0,
       exported: 0,
       readyToExport: 0,
+      reexportable: 0,
     };
   }
 

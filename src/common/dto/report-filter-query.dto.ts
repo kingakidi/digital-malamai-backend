@@ -2,7 +2,6 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
-  IsDateString,
   IsEnum,
   IsOptional,
   IsString,
@@ -51,14 +50,4 @@ export class ReportFilterQueryDto extends PaginationQueryDto {
   })
   @IsBoolean()
   isActive?: boolean;
-
-  @ApiPropertyOptional({ example: '2026-01-01' })
-  @IsOptional()
-  @IsDateString()
-  dateFrom?: string;
-
-  @ApiPropertyOptional({ example: '2026-12-31' })
-  @IsOptional()
-  @IsDateString()
-  dateTo?: string;
 }

@@ -1,6 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDateString, IsInt, IsOptional, Max, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  Max,
+  Min,
+} from 'class-validator';
+import { AccessCodeExportMode } from './export-unused-access-codes.dto';
 
 /** Dedicated export browse pagination — larger page size than the normal admin list. */
 export class AccessCodesForExportQueryDto {
@@ -23,6 +31,14 @@ export class AccessCodesForExportQueryDto {
   @Min(1)
   @Max(100)
   limit: number = 100;
+
+  @ApiPropertyOptional({
+    enum: AccessCodeExportMode,
+    default: AccessCodeExportMode.READY,
+  })
+  @IsOptional()
+  @IsEnum(AccessCodeExportMode)
+  mode?: AccessCodeExportMode = AccessCodeExportMode.READY;
 
   @ApiPropertyOptional({ example: '2026-01-01' })
   @IsOptional()

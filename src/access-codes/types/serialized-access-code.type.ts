@@ -34,4 +34,6 @@ export interface AccessCodeStats {
   expired: number;
   exported: number;
   readyToExport: number;
+  /** Unused, not expired, already exported — available for re-export */
+  reexportable: number;
 }

@@ -309,6 +309,11 @@ export class AccessCodeStatsResponseDto {
 
   @ApiProperty({ description: 'Unused, not expired, not yet exported' })
   readyToExport: number;
+
+  @ApiProperty({
+    description: 'Unused, not expired, previously exported (re-exportable)',
+  })
+  reexportable: number;
 }
 
 export class ExportUnusedAccessCodesResultDto {
