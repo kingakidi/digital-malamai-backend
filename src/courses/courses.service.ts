@@ -541,6 +541,19 @@ export class CoursesService {
     return buildPaginatedResult(items, total, query);
   }
 
+  async findAdminPaymentById(id: string): Promise<PaymentTransaction> {
+    const transaction = await this.transactionsRepository.findOne({
+      where: { id },
+      relations: ['user', 'partner', 'course'],
+    });
+
+    if (!transaction) {
+      throw new NotFoundException(`Transaction ${id} not found`);
+    }
+
+    return transaction;
+  }
+
   // ─── Serialization helpers ───────────────────────────────────────────────
 
   buildEnrollmentSummary(

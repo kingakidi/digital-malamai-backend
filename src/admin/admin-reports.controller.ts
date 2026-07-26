@@ -87,4 +87,11 @@ export class AdminReportsController {
   findTransactions(@Query() query: ReportFilterQueryDto) {
     return this.coursesService.findAdminPayments(query);
   }
+
+  @Get('transactions/:id')
+  @ApiOkData(PaymentTransactionResponseDto)
+  @ResponseMessage('Transaction retrieved successfully')
+  findTransaction(@Param('id', ParseUUIDPipe) id: string) {
+    return this.coursesService.findAdminPaymentById(id);
+  }
 }
