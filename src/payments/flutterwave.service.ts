@@ -49,28 +49,51 @@ export class FlutterwaveService {
   }
 
   async verifyByReference(txRef: string): Promise<FlutterwaveVerifyData> {
-    const secretKey = this.getSecretKey();
-    const baseUrl = this.configService.get<string>('flutterwave.baseUrl');
+    const payload = await this.fetchVerifyByReferenceRaw(txRef);
+    return this.normalizeVerifyData(payload.data!);
+  }
 
-    const response = await this.fetchWithTimeout(
-      `${baseUrl}/transactions/verify_by_reference?tx_ref=${encodeURIComponent(txRef)}`,
-      {
-        headers: {
-          Authorization: `Bearer ${secretKey}`,
-          'Content-Type': 'application/json',
-        },
-      },
-    );
+  async fetchRawVerifyResponse(input: {
+    externalTransactionId?: string | null;
+    txRef?: string | null;
+  }): Promise<{
+    lookup: 'transaction_id' | 'tx_ref' | 'charge_id';
+    lookupValue: string;
+    raw: unknown;
+  }> {
+    const externalId = input.externalTransactionId?.trim();
+    const txRef = input.txRef?.trim();
 
-    const payload = (await response.json()) as FlutterwaveVerifyResponse;
+    if (externalId) {
+      if (externalId.startsWith('chg_')) {
+        const raw = await this.fetchChargeRaw(externalId);
+        return {
+          lookup: 'charge_id',
+          lookupValue: externalId,
+          raw,
+        };
+      }
 
-    if (!response.ok || payload.status !== 'success' || !payload.data) {
-      throw new BadRequestException(
-        payload.message ?? 'Unable to verify Flutterwave transaction by reference',
-      );
+      const raw = await this.fetchVerifyByIdRaw(externalId);
+      return {
+        lookup: 'transaction_id',
+        lookupValue: externalId,
+        raw,
+      };
     }
 
-    return this.normalizeVerifyData(payload.data);
+    if (txRef) {
+      const raw = await this.fetchVerifyByReferenceRaw(txRef);
+      return {
+        lookup: 'tx_ref',
+        lookupValue: txRef,
+        raw,
+      };
+    }
+
+    throw new BadRequestException(
+      'Transaction has neither a Flutterwave transaction id nor a tx_ref',
+    );
   }
 
   isSuccessfulPayment(data: FlutterwaveVerifyData): boolean {
@@ -196,6 +219,13 @@ export class FlutterwaveService {
   private async verifyLegacyTransaction(
     transactionId: string,
   ): Promise<FlutterwaveVerifyData> {
+    const payload = await this.fetchVerifyByIdRaw(transactionId);
+    return this.normalizeVerifyData(payload.data!);
+  }
+
+  private async fetchVerifyByIdRaw(
+    transactionId: string,
+  ): Promise<FlutterwaveVerifyResponse> {
     const secretKey = this.getSecretKey();
     const baseUrl = this.configService.get<string>('flutterwave.baseUrl');
 
@@ -217,10 +247,41 @@ export class FlutterwaveService {
       );
     }
 
-    return this.normalizeVerifyData(payload.data);
+    return payload;
   }
 
-  private async verifyCharge(chargeId: string): Promise<FlutterwaveVerifyData> {
+  private async fetchVerifyByReferenceRaw(
+    txRef: string,
+  ): Promise<FlutterwaveVerifyResponse> {
+    const secretKey = this.getSecretKey();
+    const baseUrl = this.configService.get<string>('flutterwave.baseUrl');
+
+    const response = await this.fetchWithTimeout(
+      `${baseUrl}/transactions/verify_by_reference?tx_ref=${encodeURIComponent(txRef)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${secretKey}`,
+          'Content-Type': 'application/json',
+        },
+      },
+    );
+
+    const payload = (await response.json()) as FlutterwaveVerifyResponse;
+
+    if (!response.ok || payload.status !== 'success' || !payload.data) {
+      throw new BadRequestException(
+        payload.message ?? 'Unable to verify Flutterwave transaction by reference',
+      );
+    }
+
+    return payload;
+  }
+
+  private async fetchChargeRaw(chargeId: string): Promise<{
+    status: string;
+    message: string;
+    data?: Record<string, unknown>;
+  }> {
     const secretKey = this.getSecretKey();
     const baseUrl = this.configService.get<string>('flutterwave.baseUrl');
 
@@ -243,10 +304,23 @@ export class FlutterwaveService {
       );
     }
 
-    const data = payload.data;
+    return payload;
+  }
+
+  private async verifyCharge(chargeId: string): Promise<FlutterwaveVerifyData> {
+    const payload = await this.fetchChargeRaw(chargeId);
+    return this.normalizeVerifyData(
+      this.chargeToVerifyData(chargeId, payload.data!),
+    );
+  }
+
+  private chargeToVerifyData(
+    chargeId: string,
+    data: Record<string, unknown>,
+  ): FlutterwaveVerifyData {
     const customer = (data.customer ?? {}) as Record<string, unknown>;
 
-    return this.normalizeVerifyData({
+    return {
       id: String(data.id ?? chargeId),
       tx_ref: String(data.reference ?? data.tx_ref ?? ''),
       flw_ref: data.flw_ref as string | undefined,
@@ -261,7 +335,7 @@ export class FlutterwaveService {
           (customer.phone_number as string | undefined) ??
           (customer.phonenumber as string | undefined),
       },
-    });
+    };
   }
 
   private async fetchWithTimeout(

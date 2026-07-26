@@ -1,11 +1,20 @@
-import { Controller, Get, Param, Put, Body, Query, UseGuards, ParseUUIDPipe } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  Get,
+  Param,
+  Put,
+  Body,
+  Query,
+  UseGuards,
+  ParseUUIDPipe,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { RequireRole } from '../common/abac/decorators/require-role.decorator';
 import { JwtAuthGuard } from '../common/abac/guards/jwt-auth.guard';
 import { RoleGuard } from '../common/abac/guards/role.guard';
 import { STAFF_COURSE_ROLES } from '../common/constants/staff-roles.constants';
 import { ResponseMessage } from '../common/decorators/response-message.decorator';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { ReportFilterQueryDto } from '../common/dto/report-filter-query.dto';
 import {
   ApiOkData,
@@ -14,7 +23,9 @@ import {
   PaymentTransactionResponseDto,
   UserResponseDto,
 } from '../common/swagger';
+import { PaymentPlatform } from '../common/types/payment.types';
 import { CoursesService } from '../courses/courses.service';
+import { FlutterwaveService } from '../payments/flutterwave.service';
 import { AdminPatchStudentDto } from '../students/dto/admin-patch-student.dto';
 import { StudentsService } from '../students/students.service';
 
@@ -27,6 +38,7 @@ export class AdminReportsController {
   constructor(
     private readonly coursesService: CoursesService,
     private readonly studentsService: StudentsService,
+    private readonly flutterwaveService: FlutterwaveService,
   ) {}
 
   @Get('students')
@@ -93,5 +105,31 @@ export class AdminReportsController {
   @ResponseMessage('Transaction retrieved successfully')
   findTransaction(@Param('id', ParseUUIDPipe) id: string) {
     return this.coursesService.findAdminPaymentById(id);
+  }
+
+  @Get('transactions/:id/flutterwave')
+  @ResponseMessage('Flutterwave transaction details retrieved successfully')
+  async fetchFlutterwaveDetails(@Param('id', ParseUUIDPipe) id: string) {
+    const transaction = await this.coursesService.findAdminPaymentById(id);
+
+    if (transaction.paymentPlatform !== PaymentPlatform.FLUTTERWAVE) {
+      throw new BadRequestException(
+        `Platform "${transaction.paymentPlatform}" is not supported for live fetch yet`,
+      );
+    }
+
+    const result = await this.flutterwaveService.fetchRawVerifyResponse({
+      externalTransactionId: transaction.externalTransactionId,
+      txRef: transaction.txRef,
+    });
+
+    return {
+      platform: transaction.paymentPlatform,
+      externalTransactionId: transaction.externalTransactionId,
+      txRef: transaction.txRef,
+      lookup: result.lookup,
+      lookupValue: result.lookupValue,
+      raw: result.raw,
+    };
   }
 }

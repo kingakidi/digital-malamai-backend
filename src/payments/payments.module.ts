@@ -46,6 +46,7 @@ import { WebhooksController } from './webhooks.controller';
     PaymentFulfillmentService,
     PaymentEligibilityService,
     PaymentSyncService,
+    FlutterwaveService,
   ],
 })
 export class PaymentsModule {}
