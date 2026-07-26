@@ -23,7 +23,7 @@ export class RegisterStudentDto {
   @IsUUID()
   partnerId?: string;
 
-  @ApiProperty({ example: 'Jane Doe' })
+  @ApiProperty({ example: 'Amina Yusuf' })
   @IsString()
   @IsNotEmpty()
   fullName: string;
