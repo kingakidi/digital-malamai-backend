@@ -430,7 +430,10 @@ export class CoursesService {
   }
 
   async findCourseBySlugForStaff(slug: string): Promise<Course> {
-    const course = await this.coursesRepository.findOne({ where: { slug } });
+    const course = await this.coursesRepository.findOne({
+      where: { slug },
+      relations: ['category'],
+    });
 
     if (!course) {
       throw new NotFoundException(`Course with slug "${slug}" not found`);

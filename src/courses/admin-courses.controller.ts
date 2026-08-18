@@ -49,7 +49,7 @@ export class AdminCoursesController {
   }
 
   @Get('slug/:slug')
-  @RequireRole(RoleName.SUPERADMIN, RoleName.ADMIN)
+  @RequireRole(...STAFF_COURSE_ROLES)
   @ApiOkData(CourseResponseDto)
   @ResponseMessage('Course retrieved successfully')
   findBySlug(@Param('slug') slug: string) {
