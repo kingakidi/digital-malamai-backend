@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'crypto';
 import { DataSource, Repository } from 'typeorm';
 import { OnboardingStatus } from '../common/types/onboarding-status.type';
 import {
@@ -1172,9 +1173,10 @@ export class PaymentFulfillmentService {
 
     let emailSent = false;
     let whatsappSent = false;
-    const whatsappEnabled = (
-      await this.settingsService.getCourseWhatsappDelivery()
-    ).enabled;
+    // WhatsApp auto-delivery temporarily disabled — keep setting lookup commented for easy restore.
+    // const whatsappEnabled = (
+    //   await this.settingsService.getCourseWhatsappDelivery()
+    // ).enabled;
 
     try {
       await this.mailService.sendTemplateMail(user.email, 'course-delivery', {
@@ -1184,16 +1186,18 @@ export class PaymentFulfillmentService {
       });
       emailSent = true;
 
-      if (whatsappEnabled && user.phone) {
-        const linksText =
-          links || 'Check your email for video links.';
-        await this.phoneMessagingService.sendCourseAccessMessage(
-          user.phone,
-          courseTitle,
-          linksText,
-        );
-        whatsappSent = true;
-      }
+      // WhatsApp course-link delivery temporarily disabled (Twilio template/approval issues).
+      // Re-enable when WhatsApp Content Templates are approved and reliable.
+      // if (whatsappEnabled && user.phone) {
+      //   const linksText =
+      //     links || 'Check your email for video links.';
+      //   await this.phoneMessagingService.sendCourseAccessMessage(
+      //     user.phone,
+      //     courseTitle,
+      //     linksText,
+      //   );
+      //   whatsappSent = true;
+      // }
 
       await this.notificationsService.log({
         userId: user.id,
@@ -1214,6 +1218,129 @@ export class PaymentFulfillmentService {
     }
 
     return { emailSent, whatsappSent };
+  }
+
+  /**
+   * Enroll an onboarded student in free / zero-priced courses without Flutterwave.
+   * Paid checkout still goes through verifyAndFulfill.
+   */
+  async enrollFreeCourses(userId: string, courseIds: string[]) {
+    const user = await this.userService.findByIdWithRole(userId);
+    if (!user || user.role.name !== RoleName.STUDENT) {
+      throw new ForbiddenException('Only students can enroll in courses');
+    }
+
+    if (user.onboardingStatus !== OnboardingStatus.ONBOARDED) {
+      throw new BadRequestException(
+        'Student must complete onboarding before enrolling in courses',
+      );
+    }
+
+    const uniqueIds = [...new Set(courseIds.map((id) => id.trim()).filter(Boolean))];
+    if (uniqueIds.length === 0) {
+      throw new BadRequestException('At least one courseId is required');
+    }
+
+    const courses: Course[] = [];
+    for (const courseId of uniqueIds) {
+      const course = await this.coursesService.findPublishedCourse(courseId);
+      const expectedAmount = this.coursesService.getExpectedCourseAmount(course);
+      if (!course.isFree && expectedAmount > 0) {
+        throw new BadRequestException(
+          `Course "${course.title}" is not free and requires payment`,
+        );
+      }
+      courses.push(course);
+    }
+
+    const pendingDeliveries: Array<{
+      courseId: string;
+      courseTitle: string;
+    }> = [];
+    const enrollmentIds: string[] = [];
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      for (const course of courses) {
+        const existingEnrollment = await this.coursesService.findEnrollment(
+          user.id,
+          course.id,
+        );
+
+        if (existingEnrollment) {
+          throw new ConflictException(
+            `You are already enrolled in "${course.title}"`,
+          );
+        }
+
+        const externalTransactionId = `free-${randomUUID()}`;
+        const transaction = manager.create(PaymentTransaction, {
+          paymentPlatform: PaymentPlatform.FLUTTERWAVE,
+          externalTransactionId,
+          txRef: `dm-free-${course.id.slice(0, 8)}`,
+          flwRef: null,
+          paidFor: PaidFor.COURSE,
+          userId: user.id,
+          partnerId: user.partnerId ?? null,
+          courseId: course.id,
+          amount: 0,
+          fees: 0,
+          partnerCut: 0,
+          platformCut: 0,
+          currency: 'NGN',
+          status: PaymentStatus.SUCCESS,
+          webhookVerified: false,
+          apiVerified: true,
+          fulfillmentCompleted: false,
+          verifiedAt: new Date(),
+          metadata: {
+            paidFor: PaidFor.COURSE,
+            courseId: course.id,
+            userId: user.id,
+            freeEnrollment: true,
+          },
+        });
+        await manager.save(transaction);
+
+        const enrollment = manager.create(CourseEnrollment, {
+          userId: user.id,
+          courseId: course.id,
+          paymentTransactionId: transaction.id,
+          enrolledAt: new Date(),
+          paymentStatus: PaymentStatus.SUCCESS,
+          unlockedAt: new Date(),
+        });
+        await manager.save(enrollment);
+
+        transaction.fulfillmentCompleted = true;
+        await manager.save(transaction);
+
+        enrollmentIds.push(enrollment.id);
+        pendingDeliveries.push({
+          courseId: course.id,
+          courseTitle: course.title,
+        });
+      }
+
+      return {
+        enrollmentId: enrollmentIds[0] ?? null,
+        courseIds: courses.map((course) => course.id),
+        enrollmentIds,
+      };
+    });
+
+    for (const delivery of pendingDeliveries) {
+      await this.deliverCourseAccess(user, delivery.courseId, delivery.courseTitle);
+    }
+
+    return {
+      success: true,
+      ...result,
+      userId: user.id,
+      delivery: {
+        email: true,
+        whatsapp: false,
+      },
+    };
   }
 
   async resendCourseAccess(userId: string, courseId: string) {

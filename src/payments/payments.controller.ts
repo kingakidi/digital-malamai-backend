@@ -8,6 +8,7 @@ import { ResponseMessage } from '../common/decorators/response-message.decorator
 import { AuthenticatedUser } from '../common/interfaces/authenticated-user.interface';
 import { RoleName } from '../common/types/permission.types';
 import { ApiCreatedData, ApiOkData, PaymentVerifyResponseDto } from '../common/swagger';
+import { EnrollFreeCoursesDto } from './dto/enroll-free-courses.dto';
 import { VerifyPaymentDto } from './dto/verify-payment.dto';
 import { PaymentFulfillmentService } from './payment-fulfillment.service';
 import { PaymentsService } from './payments.service';
@@ -31,6 +32,19 @@ export class PaymentsController {
     @Body() dto: VerifyPaymentDto,
   ) {
     return this.paymentsService.verifyPayment(dto, user.email);
+  }
+
+  @Post('courses/enroll-free')
+  @ApiCreatedData(Object)
+  @ResponseMessage('Free course enrollment completed')
+  enrollFree(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: EnrollFreeCoursesDto,
+  ) {
+    return this.paymentFulfillmentService.enrollFreeCourses(
+      user.id,
+      dto.courseIds,
+    );
   }
 
   @Post('courses/:courseId/resend-access')
