@@ -28,15 +28,18 @@ export default registerAs('messaging', () => ({
     accountSid: process.env.TWILIO_ACCOUNT_SID ?? '',
     authToken: process.env.TWILIO_AUTH_TOKEN ?? '',
     whatsappFrom: process.env.TWILIO_WHATSAPP_FROM ?? '',
+    smsFrom: process.env.TWILIO_SMS_FROM ?? '',
+    messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID ?? '',
+    // Approved Content Templates (HX...). Required for business-initiated WhatsApp (OTP).
+    otpContentSid:
+      process.env.TWILIO_WHATSAPP_OTP_CONTENT_SID ??
+      process.env.TWILIO_WHATSAPP_CONTENT_SID ??
+      '',
+    messageContentSid: process.env.TWILIO_WHATSAPP_MESSAGE_CONTENT_SID ?? '',
   },
   meta: {
     accessToken: process.env.META_WHATSAPP_ACCESS_TOKEN ?? '',
     phoneNumberId: process.env.META_WHATSAPP_PHONE_NUMBER_ID ?? '',
     apiVersion: process.env.META_WHATSAPP_API_VERSION ?? 'v21.0',
-  },
-  termii: {
-    apiKey: process.env.TERMII_API_KEY ?? '',
-    senderId: process.env.TERMII_SENDER_ID ?? '',
-    baseUrl: process.env.TERMII_BASE_URL ?? 'https://api.ng.termii.com/api',
   },
 }));

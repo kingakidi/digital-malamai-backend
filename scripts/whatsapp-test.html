@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WhatsApp test</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f6f8;
+        --card: #ffffff;
+        --text: #1a202c;
+        --muted: #667185;
+        --border: #d0d5dd;
+        --accent: #25d366;
+        --accent-text: #063b1d;
+        --danger: #b42318;
+        --ok: #067647;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background:
+          radial-gradient(circle at top left, #d9f7e5 0%, transparent 40%),
+          var(--bg);
+        color: var(--text);
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      main {
+        width: min(100%, 480px);
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 28px;
+        box-shadow: 0 12px 40px rgb(16 24 40 / 0.08);
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 1.4rem;
+      }
+
+      p {
+        margin: 0 0 20px;
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.45;
+      }
+
+      label {
+        display: block;
+        margin: 0 0 6px;
+        font-size: 0.85rem;
+        font-weight: 600;
+      }
+
+      .hint {
+        margin: -6px 0 14px;
+        font-size: 0.78rem;
+        color: var(--muted);
+        line-height: 1.35;
+      }
+
+      input,
+      textarea,
+      select {
+        width: 100%;
+        margin-bottom: 14px;
+        padding: 12px 14px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        font: inherit;
+        background: #fff;
+      }
+
+      textarea {
+        min-height: 110px;
+        resize: vertical;
+      }
+
+      button {
+        width: 100%;
+        border: 0;
+        border-radius: 10px;
+        padding: 12px 16px;
+        font: inherit;
+        font-weight: 650;
+        cursor: pointer;
+        background: var(--accent);
+        color: var(--accent-text);
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+
+      .status {
+        margin-top: 14px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        font-size: 0.9rem;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        display: none;
+      }
+
+      .status.show {
+        display: block;
+      }
+
+      .status.ok {
+        background: #ecfdf3;
+        color: var(--ok);
+      }
+
+      .status.err {
+        background: #fef3f2;
+        color: var(--danger);
+      }
+
+      .meta {
+        margin-top: 16px;
+        font-size: 0.8rem;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      .hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>WhatsApp test</h1>
+      <p>
+        Same as production: template SIDs come from <code>.env</code>, not this
+        form. OTP uses <code>TWILIO_WHATSAPP_OTP_CONTENT_SID</code>. Course links
+        use <code>TWILIO_WHATSAPP_MESSAGE_CONTENT_SID</code>.
+      </p>
+
+      <form id="form">
+        <label for="kind">What to send</label>
+        <select id="kind" name="kind">
+          <option value="otp" selected>OTP (verification code)</option>
+          <option value="course">Course links (buyer delivery)</option>
+        </select>
+
+        <label for="phone">Phone number</label>
+        <input
+          id="phone"
+          name="phone"
+          type="tel"
+          required
+          placeholder="08012345678 or +2348012345678"
+          autocomplete="tel"
+          value="+2347064355463"
+        />
+
+        <div id="otpFields">
+          <label for="otp">OTP code</label>
+          <input
+            id="otp"
+            name="otp"
+            type="text"
+            inputmode="numeric"
+            pattern="[0-9]{4,8}"
+            placeholder="123456"
+            value="123456"
+          />
+          <p class="hint">Sent as template variable {{1}}.</p>
+        </div>
+
+        <div id="courseFields" class="hidden">
+          <label for="courseTitle">Course title ({{1}})</label>
+          <input
+            id="courseTitle"
+            name="courseTitle"
+            type="text"
+            value="Intro to Trading"
+          />
+
+          <label for="links">Lesson links ({{2}})</label>
+          <textarea id="links" name="links">
+Lesson 1: https://vimeo.com/123456789
+Lesson 2: https://vimeo.com/987654321</textarea>
+          <p class="hint">
+            Template body must be static text + variables, e.g.<br />
+            Your Digital Malamai course "{{1}}" is ready.<br /><br />
+            {{2}}
+          </p>
+        </div>
+
+        <button type="submit" id="send">Send WhatsApp</button>
+      </form>
+
+      <div id="status" class="status" role="status"></div>
+      <div class="meta" id="meta">Checking server…</div>
+    </main>
+
+    <script>
+      const form = document.getElementById("form");
+      const statusEl = document.getElementById("status");
+      const metaEl = document.getElementById("meta");
+      const sendBtn = document.getElementById("send");
+      const kindEl = document.getElementById("kind");
+      const otpFields = document.getElementById("otpFields");
+      const courseFields = document.getElementById("courseFields");
+
+      const API_BASE =
+        location.port === "5055" ? "" : "http://127.0.0.1:5055";
+
+      function showStatus(text, ok) {
+        statusEl.textContent = text;
+        statusEl.className = `status show ${ok ? "ok" : "err"}`;
+      }
+
+      function syncKind() {
+        const isOtp = kindEl.value === "otp";
+        otpFields.classList.toggle("hidden", !isOtp);
+        courseFields.classList.toggle("hidden", isOtp);
+        form.otp.required = isOtp;
+        form.courseTitle.required = !isOtp;
+        form.links.required = !isOtp;
+        sendBtn.textContent = isOtp
+          ? "Send WhatsApp OTP"
+          : "Send WhatsApp course links";
+      }
+
+      async function refreshMeta() {
+        try {
+          const res = await fetch(`${API_BASE}/api/status`);
+          const data = await res.json();
+          if (!data.configured) {
+            metaEl.textContent =
+              "Twilio credentials missing in .env (ACCOUNT_SID / AUTH_TOKEN / WHATSAPP_FROM)";
+            return;
+          }
+
+          const lines = [`From ${data.from}`];
+          lines.push(
+            data.otpContentSid
+              ? `OTP template OK (${data.otpContentSid})`
+              : "OTP: set TWILIO_WHATSAPP_OTP_CONTENT_SID",
+          );
+          lines.push(
+            data.messageContentSid
+              ? `Course template OK (${data.messageContentSid})`
+              : "Course links: set TWILIO_WHATSAPP_MESSAGE_CONTENT_SID (create Utility/Text template — not message_opt_in)",
+          );
+          if (data.messagingServiceSid) {
+            lines.push(`Messaging Service ${data.messagingServiceSid}`);
+          }
+          metaEl.textContent = lines.join("\n");
+        } catch {
+          metaEl.textContent =
+            "API not reachable on :5055. Run: node scripts/whatsapp-test-server.mjs";
+        }
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        sendBtn.disabled = true;
+        showStatus("Sending…", true);
+
+        const kind = kindEl.value;
+        const payload = {
+          kind,
+          phone: form.phone.value.trim(),
+        };
+
+        if (kind === "otp") {
+          payload.otp = form.otp.value.trim();
+        } else {
+          payload.courseTitle = form.courseTitle.value.trim();
+          payload.links = form.links.value.trim();
+        }
+
+        try {
+          const res = await fetch(`${API_BASE}/api/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+            throw new Error(data.error || `Request failed (${res.status})`);
+          }
+
+          let report = `Kind: ${data.kind}\nTo: ${data.to}\nSID: ${data.sid}\nFinal: ${data.finalStatus || data.status}`;
+          if (data.contentSid) report += `\nTemplate: ${data.contentSid}`;
+          if (data.errorCode) {
+            report += `\nError ${data.errorCode}: ${data.errorMessage || ""}`;
+          }
+
+          const ok =
+            !data.errorCode &&
+            !["undelivered", "failed"].includes(data.finalStatus || "");
+          showStatus(report, ok);
+        } catch (error) {
+          showStatus(error.message || String(error), false);
+        } finally {
+          sendBtn.disabled = false;
+        }
+      });
+
+      kindEl.addEventListener("change", syncKind);
+      syncKind();
+      refreshMeta();
+    </script>
+  </body>
+</html>

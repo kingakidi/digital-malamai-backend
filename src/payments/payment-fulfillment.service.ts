@@ -330,8 +330,8 @@ export class PaymentFulfillmentService {
     }
 
     user.phoneVerificationSkippedAt = new Date();
-    // Paying the onboarding fee completes onboarding; phone verification is
-    // optional, so record the skip and keep the student fully onboarded.
+    // Paying the onboarding fee completes onboarding. Phone/WhatsApp verification
+    // is required in the product flow; this endpoint remains for edge cases.
     user.onboardingStatus = OnboardingStatus.ONBOARDED;
     await this.userService.save(user);
 
@@ -1185,10 +1185,13 @@ export class PaymentFulfillmentService {
       emailSent = true;
 
       if (whatsappEnabled && user.phone) {
-        const whatsappBody = links
-          ? `Your course "${courseTitle}" is ready.\n\n${links}`
-          : `Your course "${courseTitle}" is ready. Check your email for video links.`;
-        await this.phoneMessagingService.sendMessage(user.phone, whatsappBody);
+        const linksText =
+          links || 'Check your email for video links.';
+        await this.phoneMessagingService.sendCourseAccessMessage(
+          user.phone,
+          courseTitle,
+          linksText,
+        );
         whatsappSent = true;
       }
 

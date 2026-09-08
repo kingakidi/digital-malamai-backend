@@ -41,7 +41,7 @@ export class AdminCoursesController {
   constructor(private readonly coursesService: CoursesService) {}
 
   @Get()
-  @RequireRole(RoleName.SUPERADMIN, RoleName.ADMIN)
+  @RequireRole(...STAFF_COURSE_ROLES)
   @ApiOkPaginated(CourseResponseDto)
   @ResponseMessage('Courses retrieved successfully')
   findAll(@Query() query: PaginationQueryDto) {

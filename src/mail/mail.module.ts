@@ -4,7 +4,7 @@ import { AccountWelcomeService } from './account-welcome.service';
 import { MailService } from './mail.service';
 import { MailTemplateService } from './mail-template.service';
 import { MetaWhatsAppProvider } from './providers/meta-whatsapp.provider';
-import { TermiiSmsProvider } from './providers/termii-sms.provider';
+import { TwilioSmsProvider } from './providers/twilio-sms.provider';
 import { TwilioWhatsAppProvider } from './providers/twilio-whatsapp.provider';
 import { PhoneMessagingService } from './phone-messaging.service';
 
@@ -15,8 +15,8 @@ import { PhoneMessagingService } from './phone-messaging.service';
     MailService,
     AccountWelcomeService,
     TwilioWhatsAppProvider,
+    TwilioSmsProvider,
     MetaWhatsAppProvider,
-    TermiiSmsProvider,
     PhoneMessagingService,
   ],
   exports: [
