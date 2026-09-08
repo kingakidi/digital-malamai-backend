@@ -27,6 +27,7 @@ import { UpdateCourseDto } from './dto/update-course.dto';
 import { CourseEnrollment } from './entities/course-enrollment.entity';
 import { CourseVideo } from './entities/course-video.entity';
 import { Course } from './entities/course.entity';
+import { CourseResourceType } from './enums/course-resource-type.enum';
 import { CourseCategoriesService } from './course-categories.service';
 import {
   CourseEnrollmentSummary,
@@ -360,8 +361,13 @@ export class CoursesService {
       courseId,
       title: dto.title,
       vimeoUrl: dto.vimeoUrl,
+      resourceType: dto.resourceType ?? CourseResourceType.VIDEO,
       position: dto.position ?? 0,
-      duration: dto.duration ?? null,
+      duration:
+        (dto.resourceType ?? CourseResourceType.VIDEO) ===
+        CourseResourceType.VIDEO
+          ? (dto.duration ?? null)
+          : null,
       details: dto.details ?? null,
     });
 
@@ -375,6 +381,10 @@ export class CoursesService {
   ): Promise<CourseVideo> {
     const video = await this.findCourseVideo(courseId, videoId);
     Object.assign(video, dto);
+    const nextType = video.resourceType ?? CourseResourceType.VIDEO;
+    if (nextType !== CourseResourceType.VIDEO) {
+      video.duration = null;
+    }
     return this.videosRepository.save(video);
   }
 

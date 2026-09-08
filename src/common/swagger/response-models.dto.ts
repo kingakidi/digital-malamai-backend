@@ -494,6 +494,9 @@ export class CourseVideoResponseDto {
   @ApiProperty()
   vimeoUrl: string;
 
+  @ApiProperty({ enum: ['video', 'document', 'image'], default: 'video' })
+  resourceType: string;
+
   @ApiProperty()
   position: number;
 

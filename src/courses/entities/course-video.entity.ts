@@ -7,6 +7,7 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { Course } from './course.entity';
+import { CourseResourceType } from '../enums/course-resource-type.enum';
 
 @Entity('course_videos')
 export class CourseVideo {
@@ -23,8 +24,16 @@ export class CourseVideo {
   @Column()
   title: string;
 
+  /** Resource URL (video, document, or image). Column name kept for compatibility. */
   @Column()
   vimeoUrl: string;
+
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: CourseResourceType.VIDEO,
+  })
+  resourceType: CourseResourceType;
 
   @Column({ default: 0 })
   position: number;
