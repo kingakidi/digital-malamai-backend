@@ -30,7 +30,8 @@ const ENV_RULES: EnvRule[] = [
   { key: 'TWILIO_ACCOUNT_SID', required: true },
   { key: 'TWILIO_AUTH_TOKEN', required: true },
   { key: 'TWILIO_WHATSAPP_FROM', required: true },
-  { key: 'TWILIO_SMS_FROM', required: true },
+  // Required only when SMS_ENABLED is true (checked below).
+  { key: 'TWILIO_SMS_FROM' },
   { key: 'META_WHATSAPP_ACCESS_TOKEN', required: true },
   { key: 'META_WHATSAPP_PHONE_NUMBER_ID', required: true },
   { key: 'META_WHATSAPP_API_VERSION', required: true, nonEmpty: true },
@@ -90,6 +91,11 @@ export function validateEnvironment(
 
   if (!['true', 'false', '1', '0', 'yes', 'no', 'on', 'off'].includes(smsEnabled)) {
     errors.push('SMS_ENABLED must be true or false');
+  }
+
+  const smsOn = ['true', '1', 'yes', 'on'].includes(smsEnabled);
+  if (smsOn && String(config.TWILIO_SMS_FROM ?? '').trim() === '') {
+    errors.push('TWILIO_SMS_FROM is required when SMS_ENABLED is true');
   }
 
   for (const key of ['SMTP_USE_SSL', 'SMTP_USE_TLS'] as const) {
